@@ -243,17 +243,15 @@ def get_instagram_followers(fb_ad_account_id, date_start, date_end):
     engine = get_engine() # engine_db -> engine 통합 완료
     query = f"""
     SELECT DISTINCT ON (it.as_of_date)
-        aa.account_name, 
+        aa.name AS account_name, 
         it.as_of_date AS updated_at, 
-        it.total_followers AS follower_count, 
+        it.followers_count AS follower_count, 
         it.profile_views
     FROM ig_insights_total it
     JOIN ig_accounts ia
         ON it.ig_id = ia.id
-    JOIN business_portfolios bp
-        ON ia.business_portfolio_id = bp.id
     JOIN ad_accounts aa 
-        ON bp.id = aa.business_portfolio_id
+        ON ia.id = aa.ig_account_id
     WHERE aa.fb_ad_account_id = '{fb_ad_account_id}'
         AND it.as_of_date >= '{date_start}'
         AND it.as_of_date 
