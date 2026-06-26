@@ -1844,18 +1844,20 @@ def render_follower_age_gender_stacked_barh_chart(chart_data, color_map):
 
     # 시리즈 이름/데이터 정리
     parsed = []
+    NAME_MAP = {
+        "male": ("남성", COLOR_MALE), "남성": ("남성", COLOR_MALE),
+        "female": ("여성", COLOR_FEMALE), "여성": ("여성", COLOR_FEMALE),
+        "unknown": ("알 수 없음", COLOR_UNKNOWN), "알 수 없음": ("알 수 없음", COLOR_UNKNOWN),
+        "known": ("남/여 전체", COLOR_KNOWN), "남/여 전체": ("남/여 전체", COLOR_KNOWN),
+    }
+
     for s in series:
         name = str(s.get("name", "")).strip().lower()
         data = pd.to_numeric(pd.Series(s.get("data", [])), errors="coerce").fillna(0).tolist()
 
-        if name in ["male", "남성"]:
-            parsed.append(("남성", data, COLOR_MALE, "#252525"))
-        elif name in ["female", "여성"]:
-            parsed.append(("여성", data, COLOR_FEMALE, "#252525"))
-        elif name in ["unknown", "알 수 없음"]:
-            parsed.append(("알 수 없음", data, COLOR_UNKNOWN, "#252525"))
-        elif name in ["known", "남/여 전체"]:
-            parsed.append(("남/여 전체", data, COLOR_KNOWN, "#252525"))
+        if name in NAME_MAP:
+            label, color = NAME_MAP[name]
+            parsed.append((label, data, color, "#252525"))
 
     if not parsed:
         return ""
