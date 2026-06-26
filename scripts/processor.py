@@ -564,6 +564,7 @@ def get_content_ctr_data(account_id, date_start, date_end, threshold, is_top=Tru
             OR c.name ILIKE '%%depart%%'
             OR c.name LIKE '%%디파트%%'
             OR c.name ILIKE '%%de;part%%')
+        AND ig.fb_ig_media_id is NOT NULL
     GROUP BY
         COALESCE(ig.fb_ig_media_id, 'AD_' || ad.id::text)   -- ★ 이 키 하나로 "중복만 합치기"
     HAVING SUM(apd.impressions) >= {threshold}
@@ -2158,8 +2159,6 @@ def get_purchase_summary_page_data(account_id, date_start, date_end):
           AND apd.as_of_date <= '{date_end}'::date
           AND apd.purchase_count IS NOT NULL
           AND apd.purchase_count > 0
-          AND apd.spend IS NOT NULL
-          AND apd.purchase_roas IS NOT NULL
           AND ({account_id} IN (3, 2, 26) OR c.name ILIKE '%%depart%%' OR c.name LIKE '%%디파트%%' OR c.name ILIKE '%%de;part%%')
     """
 
