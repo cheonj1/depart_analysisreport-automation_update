@@ -1341,8 +1341,10 @@ def render_target_spend_pie_charts(dataset: Dict[str, Any], color_map: Dict[str,
 
     gender_kr = {"female": "여성", "male": "남성"}
 
-    # 연령 파이 전용 컬러맵
-    pie_cmap = plt.cm.viridis_r
+    # 연령 파이 전용 컬러맵 — 팔로워 차트 '남/여 전체' 초록(#AEC69F) 채도 계열
+    pie_cmap = LinearSegmentedColormap.from_list(
+        "sage_green", ["#D6EAC8", "#AEC69F", "#5E8845"]
+    )
 
     def cmap_colors(spends):
         """지출 큰 순서대로 진한 색 적용 (차트 내 정규화)."""
