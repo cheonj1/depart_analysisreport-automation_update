@@ -1363,8 +1363,10 @@ def render_target_spend_pie_charts(dataset: Dict[str, Any], color_map: Dict[str,
 
     gender_kr = {"female": "여성", "male": "남성"}
 
-    # 연령 파이 전용 컬러맵
-    pie_cmap = plt.cm.viridis_r
+    # 연령 파이 전용 컬러맵 — 팔로워 차트 '남/여 전체' 초록(#AEC69F) 채도 계열
+    pie_cmap = LinearSegmentedColormap.from_list(
+        "sage_green", ["#D6EAC8", "#AEC69F", "#5E8845"]
+    )
 
     def cmap_colors(spends):
         """지출 큰 순서대로 진한 색 적용 (차트 내 정규화)."""
@@ -1406,8 +1408,9 @@ def render_target_spend_pie_charts(dataset: Dict[str, Any], color_map: Dict[str,
         .reset_index()
         .sort_values("spend", ascending=False)
     )
-    COLOR_MALE    = "#5BB8E0"
-    COLOR_FEMALE  = "#E87DA8"
+
+    COLOR_MALE    = "#ADCAF8"   # 하늘색
+    COLOR_FEMALE  = "#FCC2C7"   # 분홍색
     GENDER_FIXED  = {"male": COLOR_MALE, "female": COLOR_FEMALE}
 
     gen_genders = gender_totals["gender"].tolist()
@@ -1858,25 +1861,27 @@ def render_follower_age_gender_stacked_barh_chart(chart_data, color_map):
     if not labels or not series:
         return ""
 
-    COLOR_MALE    = "#5BB8E0"   # 하늘색
-    COLOR_FEMALE  = "#E87DA8"   # 분홍색
-    COLOR_KNOWN   = "#5B8A38"   # 초록색
+    COLOR_MALE    = "#ADCAF8"   # 하늘색
+    COLOR_FEMALE  = "#FCC2C7"   # 분홍색
+    COLOR_KNOWN   = "#AEC69F"   # 초록색
     COLOR_UNKNOWN = "#B0B0B0"   # 회색
 
     # 시리즈 이름/데이터 정리
     parsed = []
+    NAME_MAP = {
+        "male": ("남성", COLOR_MALE), "남성": ("남성", COLOR_MALE),
+        "female": ("여성", COLOR_FEMALE), "여성": ("여성", COLOR_FEMALE),
+        "unknown": ("알 수 없음", COLOR_UNKNOWN), "알 수 없음": ("알 수 없음", COLOR_UNKNOWN),
+        "known": ("남/여 전체", COLOR_KNOWN), "남/여 전체": ("남/여 전체", COLOR_KNOWN),
+    }
+
     for s in series:
         name = str(s.get("name", "")).strip().lower()
         data = pd.to_numeric(pd.Series(s.get("data", [])), errors="coerce").fillna(0).tolist()
 
-        if name in ["male", "남성"]:
-            parsed.append(("남성", data, COLOR_MALE, "white"))
-        elif name in ["female", "여성"]:
-            parsed.append(("여성", data, COLOR_FEMALE, "white"))
-        elif name in ["unknown", "알 수 없음"]:
-            parsed.append(("알 수 없음", data, COLOR_UNKNOWN, "#252525"))
-        elif name in ["known", "남/여 전체"]:
-            parsed.append(("남/여 전체", data, COLOR_KNOWN, "white"))
+        if name in NAME_MAP:
+            label, color = NAME_MAP[name]
+            parsed.append((label, data, color, "#252525"))
 
     if not parsed:
         return ""
@@ -1961,10 +1966,10 @@ def render_follower_gender_doughnut_chart(chart_data, color_map):
 
     values = [float(v) for v in values]
 
-    COLOR_MALE    = "#8DC8E1"
-    COLOR_FEMALE  = "#EAB3C9"
-    COLOR_KNOWN   = "#A8C194"
-    COLOR_UNKNOWN = "#B0B0B0"
+    COLOR_MALE    = "#ADCAF8"   # 하늘색
+    COLOR_FEMALE  = "#FCC2C7"   # 분홍색
+    COLOR_KNOWN   = "#AEC69F"   # 초록색
+    COLOR_UNKNOWN = "#B0B0B0"   # 회색
 
     def _pick_color(label: str) -> str:
         label = str(label).strip()
@@ -2004,6 +2009,9 @@ def render_follower_gender_doughnut_chart(chart_data, color_map):
     )
 
     for i, t in enumerate(autotexts):
+        # 어두운 텍스트
+        t.set_color("#252525")
+
         t.set_fontsize(14)
         t.set_fontweight("bold")
 
