@@ -1658,6 +1658,7 @@ def get_purchase_roas_weekly(account_id, date_start, date_end):
           AND apd.as_of_date >= '{date_start}'::date
           AND apd.as_of_date <= '{date_end}'::date
           AND apd.spend IS NOT NULL
+          AND apd.purchase_count > 0
           AND ({account_id} IN (3, 2, 26) OR c.name ILIKE '%%depart%%' OR c.name LIKE '%%디파트%%' OR c.name ILIKE '%%de;part%%')
         GROUP BY (DATE_TRUNC('week', apd.as_of_date) + INTERVAL '6 days')::date
         ORDER BY week_start
@@ -1685,6 +1686,7 @@ def get_purchase_roas_monthly(account_id, date_start, date_end):
           AND apd.as_of_date <= '{date_end}'::date
           AND apd.purchase_roas IS NOT NULL
           AND apd.spend IS NOT NULL
+          AND apd.purchase_count > 0
           AND ({account_id} IN (3, 2, 26) OR c.name ILIKE '%%depart%%' OR c.name LIKE '%%디파트%%' OR c.name ILIKE '%%de;part%%')
         GROUP BY DATE_TRUNC('month', apd.as_of_date)::date
         ORDER BY month_start

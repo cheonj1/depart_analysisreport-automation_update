@@ -409,7 +409,7 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     # purchase_summary_page가 이미 is_visible=True면 이 페이지는 건너뜀
     if final_report.get("purchase_summary_page", {}).get("is_visible"):
         print("광고비/매출발생 데이터 없음 (요약 페이지 표시 중)...")
-    elif has_revenue_data(target_id, start, end):
+    elif total_purchases >= 10 and has_revenue_data(target_id, start, end):
         print("광고비/매출발생 데이터 생성 중...")
         spend_revenue_weekly_df = get_spend_and_revenue_weekly(target_id, start, end)
         spend_revenue_monthly_df = get_spend_and_revenue_monthly(target_id, start, end)
