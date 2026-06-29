@@ -513,7 +513,6 @@ def run():
         "main_gender": "male", # male, female
         "avoid_age": "",
         "avoid_gender": "",
-    }
 
     target_id, fb_ad_account_id = config["target_id"], config["fb_ad_account_id"]
     start, end = config["start"], config["end"]
@@ -531,7 +530,7 @@ def run():
                     avoid_age=avoid_age, avoid_gender=avoid_gender)
     
     report_path = "json_reports/integrated_report.json"
-    theme_color = "#737E89"
+    theme_color = "#12483D"
 
     report_json = _load_report(report_path)
     _apply_display_predicate_suffix(report_json)

@@ -358,13 +358,16 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
         purchase_weekly_df = get_purchase_count_weekly(target_id, start, end)
         purchase_monthly_df = get_purchase_count_monthly(target_id, start, end)
 
-        add_ds("purchase_roas_weekly", "line", "평균 ROAS (주별)", roas_weekly_df, "%", "week_start", ["avg_roas"])
-        add_ds("purchase_roas_monthly", "line", "평균 ROAS (월별)", roas_monthly_df, "%", "month_start", ["avg_roas"])
+        has_roas_data = bool(roas_weekly_df is not None and not roas_weekly_df.empty and (roas_weekly_df["avg_roas"].fillna(0) != 0).any())
+        if has_roas_data:
+            add_ds("purchase_roas_weekly", "line", "평균 ROAS (주별)", roas_weekly_df, "%", "week_start", ["avg_roas"])
+            add_ds("purchase_roas_monthly", "line", "평균 ROAS (월별)", roas_monthly_df, "%", "month_start", ["avg_roas"])
         add_ds("purchase_count_weekly", "line", "구매전환 (주별)", purchase_weekly_df, "건", "week_start", ["purchases"])
         add_ds("purchase_count_monthly", "line", "구매전환 (월별)", purchase_monthly_df, "건", "month_start", ["purchases"])
 
         final_report["purchase_analysis_pages"] = {
             "is_visible": True,
+            "has_roas_data": has_roas_data,
             "titles": {
                 "section_title": "전체 매출 데이터 분석",
                 "page_1_title": "평균 ROAS",
@@ -388,6 +391,7 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
             "is_visible": True,
             "total_purchases": summary_data["total_purchases"],
             "avg_roas": summary_data["avg_roas"],
+            "has_roas_data": bool(summary_data["avg_roas"]),
             "top_content": summary_data["top_content"],
         }
         # 요약 페이지가 표시되면 광고비&매출발생 페이지는 숨김
@@ -414,33 +418,48 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
         spend_revenue_weekly_df = get_spend_and_revenue_weekly(target_id, start, end)
         spend_revenue_monthly_df = get_spend_and_revenue_monthly(target_id, start, end)
 
+        has_revenue = bool(
+            spend_revenue_weekly_df is not None
+            and not spend_revenue_weekly_df.empty
+            and (spend_revenue_weekly_df["revenue"].fillna(0) != 0).any()
+        )
+
+        if has_revenue:
+            series = ["spend", "revenue"]
+            page_title = "광고비 & 매출 발생"
+            extra_meta = {"show_legend": True}
+        else:
+            series = ["spend"]
+            page_title = "광고비"
+            extra_meta = {}
+
         add_ds(
             "spend_revenue_weekly",
             "line",
-            "광고비 & 매출발생 (주별)",
+            f"{page_title} (주별)",
             spend_revenue_weekly_df,
             currency_symbol,
             "week_start",
-            ["spend", "revenue"],
-            extra_meta={"show_legend": True}
+            series,
+            extra_meta=extra_meta
         )
 
         add_ds(
             "spend_revenue_monthly",
             "line",
-            "광고비 & 매출발생 (월별)",
+            f"{page_title} (월별)",
             spend_revenue_monthly_df,
             currency_symbol,
             "month_start",
-            ["spend", "revenue"],
-            extra_meta={"show_legend": True}
+            series,
+            extra_meta=extra_meta
         )
 
         final_report["spend_revenue_pages"] = {
             "is_visible": True,
             "titles": {
                 "section_title": "전체 매출 데이터 분석",
-                "page_1_title": "광고비 & 매출 발생"
+                "page_1_title": page_title
             }
         }
     else:
