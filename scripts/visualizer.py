@@ -512,36 +512,31 @@ def render_line_chart(dataset: Dict[str, Any], color_map: Dict[str, Any], compac
 
     # ================= [최종 평균선 그리기] =================
     if show_average:
-        # 차트에 실제로 찍힌 (날짜, 값) 수집
+    # 빨강 평균: to_json에서 넘겨준 red_start(분기 시작 보정일) 이후 점만 평균
+        red_start = dataset.get("red_start")
         base_data = (series[0].get("data") if series else []) or []
-        points = []
-        for lab, v in zip(labels, base_data):
-            if pd.isna(v):
-                continue
-            d = pd.to_datetime(lab, errors="coerce")
-            if pd.isna(d):
-                continue
-            points.append((d, float(v)))
 
         cur_vals = []
-        cur_label = None
-        if points:
-            # ★ 요청 종료일이 아니라 '실제 마지막 데이터 날짜'로 분기 판단
-            last_d = max(d for d, _ in points)
-            cur_year = last_d.year
-            cur_q = (last_d.month - 1) // 3 + 1
-            q_start = pd.Timestamp(year=cur_year, month=(cur_q - 1) * 3 + 1, day=1)
-            cur_vals = [v for d, v in points if d >= q_start]   # 이번 분기 점만
-            cur_label = f"{cur_year}년 {cur_q}분기 평균"
-
-        if not cur_vals:   # 안전장치
-            cur_vals = [v for _, v in points]
-        if not cur_vals:
-            cur_vals = [float(x) for s in series for x in (s.get("data") or []) if pd.notna(x)]
+        if red_start:
+            rs = pd.to_datetime(red_start, errors="coerce")
+            for lab, v in zip(labels, base_data):
+                if pd.isna(v):
+                    continue
+                d = pd.to_datetime(lab, errors="coerce")
+                if pd.isna(d) or (pd.notna(rs) and d < rs):
+                    continue
+                cur_vals.append(float(v))
+        if not cur_vals:   # red_start 없거나 매칭 실패 시 전체 평균
+            cur_vals = [float(v) for s in series for v in (s.get("data") or []) if pd.notna(v)]
 
         if cur_vals:
             avg_val = sum(cur_vals) / len(cur_vals)
-            if not cur_label:
+
+            # 빨강 라벨: to_json에서 넘겨준 분기(anchor)
+            current_quarter = dataset.get("current_quarter")
+            if current_quarter and current_quarter.get("year") and current_quarter.get("quarter"):
+                cur_label = f"{current_quarter['year']}년 {current_quarter['quarter']}분기 평균"
+            else:
                 cur_label = "분석 기간 전체 평균"
 
             # 1. 빨간 점선

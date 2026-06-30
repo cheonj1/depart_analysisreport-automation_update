@@ -83,6 +83,53 @@ def _assign_reaction_ranks(items, metric_col):
     return items
 
 
+def _compute_quarter_anchor(dates):
+    """
+    평균선 분기 판정.
+    - 각 주는 '그 주 목요일(월+3)'이 든 분기에 속한다 (다수결 = ISO 방식).
+    - 데이터가 해당 분기 시작에서 15일 미만(목요일 기준)이면 직전 분기로 '접어서' 라벨링하되,
+      평균 계산은 접힌 분기 시작부터 실제 마지막까지 함께 한다.
+    dates: 차트 날짜들(주별이면 각 주 월요일 = date_start / week_start)
+    반환: {anchor_year, anchor_q, red_start, anchor_q_start} 또는 None
+    """
+    ds = [pd.to_datetime(d, errors="coerce") for d in list(dates)]
+    ds = [d for d in ds if pd.notna(d)]
+    if not ds:
+        return None
+    last_date = max(ds)
+
+    # 주별 여부 자동 판정(날짜 간격 중앙값이 5일 이상이면 주별)
+    weekly = False
+    if len(ds) >= 2:
+        s = sorted(ds)
+        gaps = [(s[i + 1] - s[i]).days for i in range(len(s) - 1)]
+        gaps = [g for g in gaps if g > 0]
+        if gaps:
+            weekly = sorted(gaps)[len(gaps) // 2] >= 5
+
+    # 판정 기준일: 주별이면 그 주 목요일, 일별이면 그 날짜
+    judge = (last_date + pd.Timedelta(days=3)) if weekly else last_date
+    cur_year, cur_q = judge.year, (judge.month - 1) // 3 + 1
+    cur_q_start = pd.Timestamp(year=cur_year, month=(cur_q - 1) * 3 + 1, day=1)
+
+    # 분기 시작 며칠째(목요일 기준) → 15 미만이면 접기
+    day_in_q = (judge.normalize() - cur_q_start).days + 1
+    if day_in_q < 15:
+        anchor_year, anchor_q = (cur_year - 1, 4) if cur_q == 1 else (cur_year, cur_q - 1)
+    else:
+        anchor_year, anchor_q = cur_year, cur_q
+
+    anchor_q_start = pd.Timestamp(year=anchor_year, month=(anchor_q - 1) * 3 + 1, day=1)
+    # 빨강 평균 포함 하한: 주별이면 목요일 규칙 보정(-3일)
+    red_start = anchor_q_start - pd.Timedelta(days=3) if weekly else anchor_q_start
+
+    return {
+        "anchor_year": anchor_year,
+        "anchor_q": anchor_q,
+        "red_start": red_start.strftime("%Y-%m-%d"),
+        "anchor_q_start": anchor_q_start.strftime("%Y-%m-%d"),
+    }
+
 def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", avoid_age="", avoid_gender="", currency=""):
     # 1. 기본 설정 및 파라미터
 
@@ -179,11 +226,14 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     add_ds("insta_followers", "line", "팔로워 추이", insta_df, "명", "updated_at", ["follower_count"])
     
     # 주별
-    insta_anchor = str(pd.to_datetime(insta_df['updated_at']).max().date()) if (insta_df is not None and not insta_df.empty) else end
-    prev_q_profile_visits = get_prev_quarter_profile_visits_avg(fb_ad_account_id, insta_anchor)
-    profile_visits_meta = {"current_quarter": current_quarter_info}
-    if prev_q_profile_visits:
-        profile_visits_meta["prev_quarter_avg"] = prev_q_profile_visits
+    profile_anchor = _compute_quarter_anchor(insta_df['updated_at']) if (insta_df is not None and not insta_df.empty) else None
+    profile_visits_meta = {}
+    if profile_anchor:
+        profile_visits_meta["current_quarter"] = {"year": profile_anchor["anchor_year"], "quarter": profile_anchor["anchor_q"]}
+        profile_visits_meta["red_start"] = profile_anchor["red_start"]
+        prev_q_profile_visits = get_prev_quarter_profile_visits_avg(fb_ad_account_id, profile_anchor["anchor_q_start"])
+        if prev_q_profile_visits:
+            profile_visits_meta["prev_quarter_avg"] = prev_q_profile_visits
     add_ds(
         "insta_profile_visits", "line", "프로필 방문 수(주별)", insta_df, "회", "updated_at", ["profile_views"],
         extra_meta=profile_visits_meta
@@ -203,11 +253,14 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     )
     
     organic_df = get_organic_data(target_id, start, end)  # (주별) 추가
-    organic_anchor = str(pd.to_datetime(organic_df['date_start']).max().date()) if (organic_df is not None and not organic_df.empty) else end
-    prev_q_organic = get_prev_quarter_organic_avg(target_id, organic_anchor)
-    organic_meta = {"current_quarter": current_quarter_info}
-    if prev_q_organic:
-        organic_meta["prev_quarter_avg"] = prev_q_organic
+    organic_anchor = _compute_quarter_anchor(organic_df['date_start']) if (organic_df is not None and not organic_df.empty) else None
+    organic_meta = {}
+    if organic_anchor:
+        organic_meta["current_quarter"] = {"year": organic_anchor["anchor_year"], "quarter": organic_anchor["anchor_q"]}
+        organic_meta["red_start"] = organic_anchor["red_start"]
+        prev_q_organic = get_prev_quarter_organic_avg(target_id, organic_anchor["anchor_q_start"])
+        if prev_q_organic:
+            organic_meta["prev_quarter_avg"] = prev_q_organic
     add_ds(
         "organic_trend", "line", "오가닉 조회수 추이 (주별)", organic_df, "회", "date_start", ["organic_impressions"],
         extra_meta=organic_meta
@@ -339,11 +392,14 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     # 2. CTR 추이
     print("CTR 추이 생성 중...")
     ctr_weekly_df = get_ctr_data(target_id, start, end)
-    ctr_anchor = str(pd.to_datetime(ctr_weekly_df['week_start']).max().date()) if (ctr_weekly_df is not None and not ctr_weekly_df.empty) else end
-    prev_q_ctr = get_prev_quarter_ctr_avg(target_id, ctr_anchor)
-    ctr_meta = {"current_quarter": current_quarter_info}
-    if prev_q_ctr:
-        ctr_meta["prev_quarter_avg"] = prev_q_ctr
+    ctr_anchor = _compute_quarter_anchor(ctr_weekly_df['week_start']) if (ctr_weekly_df is not None and not ctr_weekly_df.empty) else None
+    ctr_meta = {}
+    if ctr_anchor:
+        ctr_meta["current_quarter"] = {"year": ctr_anchor["anchor_year"], "quarter": ctr_anchor["anchor_q"]}
+        ctr_meta["red_start"] = ctr_anchor["red_start"]
+        prev_q_ctr = get_prev_quarter_ctr_avg(target_id, ctr_anchor["anchor_q_start"])
+        if prev_q_ctr:
+            ctr_meta["prev_quarter_avg"] = prev_q_ctr
     add_ds(
         "ctr_trend_weekly", "line", "주별 CTR 추이", ctr_weekly_df, "%", "week_start", ["ctr"],
         extra_meta=ctr_meta
