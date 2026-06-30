@@ -512,81 +512,76 @@ def render_line_chart(dataset: Dict[str, Any], color_map: Dict[str, Any], compac
 
     # ================= [최종 평균선 그리기] =================
     if show_average:
-        all_vals = [float(v) for s in series for v in (s.get("data") or []) if pd.notna(v)]
-        if all_vals:
-            avg_val = sum(all_vals) / len(all_vals)
-            
-            # 1. 점선 그리기 (빨간색 - 이번분기)
-            ax.axhline(y=avg_val, color="#e53935", linestyle="--", linewidth=1.5, zorder=999)
-            
-            # 현재 기간 평균 라벨: "{연도}년 {분기}분기 평균" 형식으로 통일
-            current_quarter = dataset.get("current_quarter")
-            if current_quarter and current_quarter.get("year") and current_quarter.get("quarter"):
-                cur_label = f"{current_quarter['year']}년 {current_quarter['quarter']}분기 평균"
-            else:
-                # current_quarter 메타가 없는 차트를 위한 기존 방식 유지
-                if labels and len(labels) >= 2:
-                    period_text = f"{str(labels[0])} ~ {str(labels[-1])}"
-                else:
-                    period_text = "분석 기간 전체"
-                cur_label = f"{period_text} 평균"
+        # 차트에 실제로 찍힌 (날짜, 값) 수집
+        base_data = (series[0].get("data") if series else []) or []
+        points = []
+        for lab, v in zip(labels, base_data):
+            if pd.isna(v):
+                continue
+            d = pd.to_datetime(lab, errors="coerce")
+            if pd.isna(d):
+                continue
+            points.append((d, float(v)))
 
-            # 2. 텍스트 라벨 (왼쪽 고정, 빨간 글씨)
+        cur_vals = []
+        cur_label = None
+        if points:
+            # ★ 요청 종료일이 아니라 '실제 마지막 데이터 날짜'로 분기 판단
+            last_d = max(d for d, _ in points)
+            cur_year = last_d.year
+            cur_q = (last_d.month - 1) // 3 + 1
+            q_start = pd.Timestamp(year=cur_year, month=(cur_q - 1) * 3 + 1, day=1)
+            cur_vals = [v for d, v in points if d >= q_start]   # 이번 분기 점만
+            cur_label = f"{cur_year}년 {cur_q}분기 평균"
+
+        if not cur_vals:   # 안전장치
+            cur_vals = [v for _, v in points]
+        if not cur_vals:
+            cur_vals = [float(x) for s in series for x in (s.get("data") or []) if pd.notna(x)]
+
+        if cur_vals:
+            avg_val = sum(cur_vals) / len(cur_vals)
+            if not cur_label:
+                cur_label = "분석 기간 전체 평균"
+
+            # 1. 빨간 점선
+            ax.axhline(y=avg_val, color="#e53935", linestyle="--", linewidth=1.5, zorder=999)
+
+            # 2. 텍스트 라벨
             ax.text(
-                x=0.02,
-                y=avg_val,
+                x=0.02, y=avg_val,
                 s=f"{cur_label}: {avg_val:,.1f}{unit}",
-                color="#e53935",
-                fontsize=10,
-                fontweight="bold",
+                color="#e53935", fontsize=10, fontweight="bold",
                 ha="left", va="bottom",
                 bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=3),
-                zorder=1000,
-                transform=ax.get_yaxis_transform()
+                zorder=1000, transform=ax.get_yaxis_transform()
             )
 
-            # 3. 차트 하단 평균선 기준 설명
+            # 3. 차트 하단 설명
             ax.text(
-                0.01, -0.13,
-                f"----- : {cur_label}",
-                transform=ax.transAxes,
-                ha='left', va='top',
-                fontsize=10,
-                color="#e53935",
-                clip_on=False,
+                0.01, -0.13, f"----- : {cur_label}",
+                transform=ax.transAxes, ha='left', va='top',
+                fontsize=10, color="#e53935", clip_on=False,
             )
-            
-            # 4. 이전 분기 평균선 (회색)
+
+            # 4. 이전 분기 평균선 (회색) — 그대로
             if prev_quarter_avg and prev_quarter_avg.get("avg") is not None:
                 prev_year = prev_quarter_avg.get("year")
                 prev_quarter = prev_quarter_avg.get("quarter")
 
-                # 4-1. 점선 그리기
                 ax.axhline(y=prev_avg_val, color="#858585", linestyle="--", linewidth=1.5, zorder=998)
-
-                # 4-2. 텍스트 라벨
                 ax.text(
-                    x=0.02,
-                    y=prev_avg_val,
+                    x=0.02, y=prev_avg_val,
                     s=f"{prev_year}년 {prev_quarter}분기 평균: {prev_avg_val:,.1f}{unit}",
-                    color="#858585",
-                    fontsize=10,
-                    fontweight="bold",
+                    color="#858585", fontsize=10, fontweight="bold",
                     ha="left", va="bottom",
                     bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=3),
-                    zorder=997,
-                    transform=ax.get_yaxis_transform()
+                    zorder=997, transform=ax.get_yaxis_transform()
                 )
-
-                # 4-3. 차트 하단 설명 
                 ax.text(
-                    0.01, -0.24,
-                    f"----- : {prev_year}년 {prev_quarter}분기 평균",
-                    transform=ax.transAxes,
-                    ha='left', va='top',
-                    fontsize=10,
-                    color="#858585",
-                    clip_on=False,
+                    0.01, -0.24, f"----- : {prev_year}년 {prev_quarter}분기 평균",
+                    transform=ax.transAxes, ha='left', va='top',
+                    fontsize=10, color="#858585", clip_on=False,
                 )
     # =======================================================
 

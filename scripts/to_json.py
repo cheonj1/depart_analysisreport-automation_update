@@ -179,7 +179,8 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     add_ds("insta_followers", "line", "팔로워 추이", insta_df, "명", "updated_at", ["follower_count"])
     
     # 주별
-    prev_q_profile_visits = get_prev_quarter_profile_visits_avg(fb_ad_account_id, end)
+    insta_anchor = str(pd.to_datetime(insta_df['updated_at']).max().date()) if (insta_df is not None and not insta_df.empty) else end
+    prev_q_profile_visits = get_prev_quarter_profile_visits_avg(fb_ad_account_id, insta_anchor)
     profile_visits_meta = {"current_quarter": current_quarter_info}
     if prev_q_profile_visits:
         profile_visits_meta["prev_quarter_avg"] = prev_q_profile_visits
@@ -202,7 +203,8 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     )
     
     organic_df = get_organic_data(target_id, start, end)  # (주별) 추가
-    prev_q_organic = get_prev_quarter_organic_avg(target_id, end)
+    organic_anchor = str(pd.to_datetime(organic_df['date_start']).max().date()) if (organic_df is not None and not organic_df.empty) else end
+    prev_q_organic = get_prev_quarter_organic_avg(target_id, organic_anchor)
     organic_meta = {"current_quarter": current_quarter_info}
     if prev_q_organic:
         organic_meta["prev_quarter_avg"] = prev_q_organic
@@ -337,7 +339,8 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     # 2. CTR 추이
     print("CTR 추이 생성 중...")
     ctr_weekly_df = get_ctr_data(target_id, start, end)
-    prev_q_ctr = get_prev_quarter_ctr_avg(target_id, end)
+    ctr_anchor = str(pd.to_datetime(ctr_weekly_df['week_start']).max().date()) if (ctr_weekly_df is not None and not ctr_weekly_df.empty) else end
+    prev_q_ctr = get_prev_quarter_ctr_avg(target_id, ctr_anchor)
     ctr_meta = {"current_quarter": current_quarter_info}
     if prev_q_ctr:
         ctr_meta["prev_quarter_avg"] = prev_q_ctr

@@ -505,14 +505,15 @@ def run():
     start_time = time.time()
 
     config = {
-        "target_id": "32", # account_id
-        "fb_ad_account_id":"act_1002942846241389",
-        "start":"2026-04-13", #YYYY-MM-DD
-        "end": "2026-06-28",
+        "target_id": "39", # account_id
+        "fb_ad_account_id":"act_945284817907415",
+        "start":"2026-05-13", #YYYY-MM-DD
+        "end": "2026-06-29",
         "main_age": ["25-34", "35-44"],
-        "main_gender": "male", # male, female
+        "main_gender": "female", # male, female
         "avoid_age": "",
         "avoid_gender": "",
+    }
 
     target_id, fb_ad_account_id = config["target_id"], config["fb_ad_account_id"]
     start, end = config["start"], config["end"]
@@ -530,7 +531,7 @@ def run():
                     avoid_age=avoid_age, avoid_gender=avoid_gender)
     
     report_path = "json_reports/integrated_report.json"
-    theme_color = "#12483D"
+    theme_color = "#C9A67F"
 
     report_json = _load_report(report_path)
     _apply_display_predicate_suffix(report_json)
