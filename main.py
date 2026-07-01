@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 import pandas as pd
-from scripts.processor import _normalize_keyword_by_pos, _best_adverb_score, kiwi, VERB_ADJ_TAGS
+from scripts.processor import (_normalize_keyword_by_pos, _best_adverb_score, kiwi, VERB_ADJ_TAGS,
+                               get_ctr_follows_scatter_data_auto)
 from scripts.visualizer import (build_color_map, complementary_hex, render_dataset, is_dark_color, 
                                 render_bubble_chart, render_purchase_pie_chart, render_follower_gender_doughnut_chart, render_follower_age_gender_stacked_barh_chart,
                                 render_target_spend_pie_charts, render_ctr_follows_quadrant_chart,)
@@ -505,12 +506,12 @@ def run():
     start_time = time.time()
 
     config = {
-        "target_id": "39", # account_id
-        "fb_ad_account_id":"act_945284817907415",
-        "start":"2026-05-13", #YYYY-MM-DD
+        "target_id": "22", # account_id
+        "fb_ad_account_id":"act_1405475181306250",
+        "start":"2025-12-29", #YYYY-MM-DD
         "end": "2026-06-29",
         "main_age": ["25-34", "35-44"],
-        "main_gender": "female", # male, female
+        "main_gender": "", # male, female
         "avoid_age": "",
         "avoid_gender": "",
     }
@@ -531,7 +532,7 @@ def run():
                     avoid_age=avoid_age, avoid_gender=avoid_gender)
     
     report_path = "json_reports/integrated_report.json"
-    theme_color = "#C9A67F"
+    theme_color = "#1C57AD"
 
     report_json = _load_report(report_path)
     _apply_display_predicate_suffix(report_json)
@@ -770,15 +771,60 @@ def run():
     quadrant_chart_b64 = ""
 
     # scatter_fol_mean이 None이거나 0이면 팔로워 지표가 없는 기간이므로 차트를 생성하지 않는다.
-    # - None: 이전 분기 데이터 자체가 존재하지 않는 경우
+    # - None: 산점도 데이터 자체가 없는 경우
     # - 0: 팔로워 지표가 수집되지 않아 평균이 0으로 계산된 경우
     # 두 조건을 모두 통과한 경우(값이 있고 0보다 큰 경우)에만 차트를 렌더링한다.
+    # (기준선은 "선택 기간(start~end) 전체 평균" — 이전 분기 평균 아님)
     if scatter_fol_mean is not None and scatter_fol_mean != 0:
         quadrant_chart_b64 = render_ctr_follows_quadrant_chart(
             scatter_data  = scatter_rows,
             ctr_median    = scatter_ctr_mean,
             follows_median= scatter_fol_mean,
         )
+
+    # ── [임시 보강] 브랜드 자동 매칭 CSV 기반 광고 단위 CTR × 팔로우 사분면 ──
+    # Meta Marketing API로 광고별 팔로우 수집이 불가능하여, 광고 관리자에서
+    # 수동 다운로드한 CSV를 임시로 사용한다. CLI 인자 없이 ctr_csv/ 폴더를 스캔해
+    # config["fb_ad_account_id"](act_XXXX)와 CSV의 '계정 ID'가 일치하는 파일을
+    # 자동으로 찾아 쓴다. 파일명(브랜드명.csv)은 라벨일 뿐 매칭에 쓰이지 않는다.
+    # 매칭되는 CSV가 없으면 이 섹션은 조용히 건너뛰고 기존 DB 사분면만 그대로 나간다.
+    # 추후 API 연동 시 이 블록을 제거/교체한다.
+    manual_quadrant = {"image": "", "ctr_mean": None, "follows_mean": None, "notice": ""}
+    manual_rows, matched_csv_path = get_ctr_follows_scatter_data_auto(config["fb_ad_account_id"])
+
+    if matched_csv_path:
+        print(f"[임시] ctr_csv/ 폴더에서 계정 매칭 CSV 발견: {matched_csv_path}")
+        try:
+            if manual_rows:
+                # 썸네일 S3 → 로컬 다운로드 (기존 DB 사분면과 동일한 materialize 패턴)
+                _materialize_content_thumbnails(manual_rows)
+
+                manual_df = pd.DataFrame(manual_rows)
+                manual_ctr_mean = float(pd.to_numeric(manual_df["ctr"], errors="coerce").fillna(0.0).mean())
+                manual_fol_mean = float(pd.to_numeric(manual_df["follows"], errors="coerce").fillna(0.0).mean())
+
+                manual_notice = (
+                    "※ 메타 광고 관리자에서 수동 다운로드한 임시 데이터 기반 (API 연동 시 교체 예정)"
+                )
+                manual_image = render_ctr_follows_quadrant_chart(
+                    scatter_data  = manual_rows,
+                    ctr_median    = manual_ctr_mean,
+                    follows_median= manual_fol_mean,
+                    caption       = "기준선: 선택 기간 전체 평균 기준  |  " + manual_notice,
+                    out_name      = "quadrant_chart_manual.png",
+                )
+                manual_quadrant = {
+                    "image":        manual_image,
+                    "ctr_mean":     manual_ctr_mean,
+                    "follows_mean": manual_fol_mean,
+                    "notice":       manual_notice,
+                }
+            else:
+                print("  ⚠️ 매칭된 CSV에서 유효한 행을 찾지 못해 사분면을 생성하지 않습니다.")
+        except Exception as e:
+            print(f"  ⚠️ 수동 CSV 처리 실패: {e}")
+    else:
+        print(f"[임시] ctr_csv/ 폴더에서 {config['fb_ad_account_id']}에 매칭되는 CSV를 찾지 못해 광고 단위 사분면을 건너뜁니다.")
 
     # 반응 기반 콘텐츠 썸네일 처리 (추가)
     reaction_datasets = {}
@@ -899,6 +945,9 @@ def run():
             "follows_mean": scatter_fol_mean,    # median → mean
         },
 
+        # [임시 보강] 수동 CSV 기반 광고 단위 사분면 (--manual-ad-csv 지정 시에만 image 존재)
+        "manual_quadrant_chart": manual_quadrant,
+
         "annotations": {
             "ctr": [],
             "organic": [],
@@ -996,4 +1045,7 @@ def run():
     print("-" * 50)
 
 if __name__ == "__main__":
+    # CLI 인자 없이 python3 main.py 만으로 실행.
+    # 브랜드 정보는 run() 내부 config에서, 광고 단위 CTR×팔로우용 CSV는
+    # ctr_csv/ 폴더에서 계정 ID 자동 매칭으로 각각 결정된다.
     run()

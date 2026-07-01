@@ -19,7 +19,7 @@ from scripts.processor import (
     has_revenue_data, get_spend_and_revenue_weekly, get_spend_and_revenue_monthly,  # 광고/매출금액 추가
     has_follower_demographics_data, get_follower_demographics_latest_date, get_demographics_ratio, get_follower_age_gender_known_only, get_age_known_unknown_by_age, get_follower_age_gender_distribution,  # 팔로워 인구통계 추가
     get_target_spend_distribution, 
-    get_ctr_follows_scatter_data, get_prev_quarter_ctr_follows_means,
+    get_ctr_follows_scatter_data,  # 사분면 기준선은 이제 선택 기간 전체 평균으로 계산(별도 함수 불필요)
     get_prev_quarter_organic_avg, get_prev_quarter_profile_visits_avg, get_prev_quarter_ctr_avg, get_quarter_info,
 )
 
@@ -844,14 +844,18 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
 
 
     # ── CTR × 팔로우 산점도 데이터 ───────────────────────────
+    # 기준선 = "이전 분기 평균"이 아니라 선택 기간(start~end) 전체 평균으로 통일.
+    # (수동 CSV 기반 사분면과 동일한 규칙 — 전체 기간 평균 기준)
     scatter_rows = get_ctr_follows_scatter_data(target_id, start, end)
-    prev_means = get_prev_quarter_ctr_follows_means(target_id, start)
 
     if scatter_rows:
+        _scatter_df = pd.DataFrame(scatter_rows)
+        ctr_mean_val = float(pd.to_numeric(_scatter_df["ctr"], errors="coerce").fillna(0.0).mean())
+        follows_mean_val = float(pd.to_numeric(_scatter_df["follows"], errors="coerce").fillna(0.0).mean())
         final_report["ctr_follows_scatter"] = {
             "rows":        scatter_rows,
-            "ctr_mean":    prev_means.get("ctr_mean"),      # median → mean
-            "follows_mean": prev_means.get("follows_mean"), # median → mean
+            "ctr_mean":    ctr_mean_val,      # 선택 기간 전체 평균
+            "follows_mean": follows_mean_val, # 선택 기간 전체 평균
         }
     else:
         final_report["ctr_follows_scatter"] = {

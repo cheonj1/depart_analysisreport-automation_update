@@ -2167,9 +2167,14 @@ def _load_thumbnail_array(path: str):
 
 
 
-def _draw_thumbnail_cell(ax, img_array, label_text: str = "", bg_color: str = "#f0f0f0"):
+def _draw_thumbnail_cell(ax, img_array, label_text: str = "", bg_color: str = "#f0f0f0",
+                         placeholder_text: str = "이미지\n없음"):
     """
     단일 subplot axis에 썸네일 이미지(또는 placeholder)를 채워 그립니다.
+
+    placeholder_text: 이미지가 없을 때 셀 중앙에 표시할 문구.
+        기본값은 "이미지 없음"이며, CSV 임시 보강 경로에서는 광고 이름을
+        폴백 텍스트로 전달한다.
     """
     ax.axis("off")
     if img_array is not None:
@@ -2179,10 +2184,19 @@ def _draw_thumbnail_cell(ax, img_array, label_text: str = "", bg_color: str = "#
     else:
         # placeholder: 배경 색상 + 텍스트
         ax.set_facecolor(bg_color)
+        # 이미 줄바꿈이 포함된 기본 문구("이미지\n없음")는 그대로 두고,
+        # 광고 이름 등 긴 한 줄 텍스트만 셀을 벗어나지 않도록 줄바꿈 처리한다.
+        if "\n" in placeholder_text:
+            wrapped = placeholder_text
+        else:
+            import textwrap
+            wrapped = "\n".join(textwrap.wrap(placeholder_text, width=12)) or placeholder_text
+        # 기본 문구는 원본과 동일한 fontsize 9, 줄바꿈된 광고 이름은 8로 축소
+        _ph_fontsize = 9 if "\n" in placeholder_text else 8
         ax.text(
-            0.5, 0.5, "이미지\n없음",
+            0.5, 0.5, wrapped,
             ha="center", va="center",
-            fontsize=9, color="#888888",
+            fontsize=_ph_fontsize, color="#888888",
             transform=ax.transAxes,
         )
 
@@ -2242,6 +2256,8 @@ def render_ctr_follows_quadrant_chart(
     scatter_data: list[dict],
     ctr_median: float,
     follows_median: float,
+    caption: str = None,
+    out_name: str = "quadrant_chart.png",
 ) -> str:
     ctr_mean     = ctr_median
     follows_mean = follows_median
@@ -2412,17 +2428,32 @@ def render_ctr_follows_quadrant_chart(
                 thumb    = str(rep.get("thumbnail") or "").strip()
                 img_arr  = _load_thumbnail_array(thumb) if thumb else None
                 media_type = str(rep.get("ig_media_type") or "").upper()
-                _draw_thumbnail_cell(ax_th, img_arr, label_text=media_type, bg_color=bg)
+                # CSV 임시 보강 경로: 썸네일 매칭 실패 시 광고 이름(label)을 폴백 텍스트로 표시.
+                # DB 경로에는 label 키가 없으므로 기본 "이미지 없음"이 유지된다.
+                fallback = str(rep.get("label") or "").strip()
+                _draw_thumbnail_cell(
+                    ax_th, img_arr, label_text=media_type, bg_color=bg,
+                    placeholder_text=(fallback or "이미지\n없음"),
+                )
             else:
                 _draw_thumbnail_cell(ax_th, None, label_text="", bg_color="#f5f5f5")
 
     fig.suptitle("", visible=False)
 
+    # caption: CSV 임시 보강 경로에서 기준선/데이터 출처 안내 문구를 표시한다.
+    # (기본값 None → 기존 DB 경로 출력은 그대로 유지)
+    if caption:
+        fig.text(
+            0.5, 0.015, caption,
+            ha="center", va="bottom",
+            fontsize=9, color="#999999",
+        )
+
     out_dir = "static"
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
         
-    out_file = os.path.join(out_dir, "quadrant_chart.png")
+    out_file = os.path.join(out_dir, out_name)
     fig.savefig(out_file, format="png", dpi=120, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     

@@ -810,6 +810,28 @@
   </section>
   {% endif %}
 
+  {# [임시 보강] 수동 CSV 기반 광고 단위 CTR × 팔로우 사분면 (--manual-ad-csv 지정 시에만 노출).
+     추후 Meta API 연동 시 이 섹션을 제거/교체한다. #}
+  {% if manual_quadrant_chart and manual_quadrant_chart.image %}
+  <section class="page quadrant-page">
+    {{ page_header('콘텐츠 성과 (임시)') }}
+    {{ big_title('광고 단위 CTR × 팔로우 4사분면') }}
+
+    <div class="page-body">
+      <div style="text-align: center; color: #999999; font-size: 9pt; margin-bottom: 3mm;">
+        {{ manual_quadrant_chart.notice }}
+      </div>
+      <div class="span-12 quadrant-chart-container" style="display: flex; justify-content: center; padding-top: 2mm;">
+        <img
+          src="{{ manual_quadrant_chart.image | safe }}"
+          alt="광고 단위 CTR × 팔로우 4사분면 (임시 데이터)"
+          style="width: 100%; max-width: 2000px; height: auto; display: block; margin: 0 auto;"
+        />
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
 
   {# =========================================================
      (19) Keywords - Overall Top 10

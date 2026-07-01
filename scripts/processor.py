@@ -2895,3 +2895,213 @@ def get_prev_quarter_ctr_follows_means(account_id: int, date_start: str) -> dict
         "ctr_mean":     float(df["ctr"].mean()),
         "follows_mean": float(df["follows"].mean()),
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# [임시 보강] 메타 광고 관리자 수동 다운로드 CSV 기반 광고 단위 CTR×팔로우
+#
+# Meta Marketing API로는 광고(ad) 단위 팔로우/프로필 방문 수집이 불가능하여,
+# 광고 관리자에서 기간 지정 후 수동으로 내려받은 CSV를 임시로 사용한다.
+# 추후 API 연동이 가능해지면 이 블록을 제거/교체한다.
+# ─────────────────────────────────────────────────────────────
+
+# CSV 한글 헤더 → 내부 키 매핑 (헤더 공백/BOM은 로더에서 정규화 후 매칭)
+_MANUAL_AD_CSV_COLUMNS = {
+    "광고 이름":              "ad_name",
+    "광고 ID":               "fb_ad_id",
+    "캠페인 ID":             "campaign_id",
+    "계정 ID":               "account_id",
+    "계정 이름":             "account_name",
+    "Instagram 프로필 방문":  "profile_visits",
+    "Instagram 팔로우":       "follows",
+    "CTR(전체)":             "ctr",
+    "클릭(전체)":            "clicks",
+    "노출":                  "impressions",
+}
+
+# 브랜드별 CSV를 모아두는 폴더. 파일명(브랜드명.csv)은 사람이 보기 위한 라벨일 뿐이며,
+# 실제 매칭은 CSV 내부 '계정 ID' 값으로 이루어진다.
+CTR_CSV_DIR = "ctr_csv"
+
+
+def _read_manual_ad_csv(csv_path: str) -> pd.DataFrame:
+    """
+    메타 광고 관리자 수동 다운로드 CSV를 방어적으로 읽어 표준 컬럼으로 정규화한다.
+
+    - 인코딩: UTF-8-SIG(BOM) 우선, 실패 시 UTF-8, 최후 cp949 순으로 재시도
+    - 헤더 앞뒤 공백 제거 후 한글 헤더를 내부 키로 매핑
+    - 숫자 컬럼(ctr, follows, ...) 파싱 실패는 NaN → 0 처리
+    """
+    last_err = None
+    df = None
+    for enc in ("utf-8-sig", "utf-8", "cp949"):
+        try:
+            df = pd.read_csv(csv_path, dtype=str, encoding=enc)
+            break
+        except (UnicodeDecodeError, UnicodeError) as e:
+            last_err = e
+            continue
+    if df is None:
+        # 인코딩 판별 실패 시 마지막 예외를 그대로 전파
+        raise last_err if last_err else ValueError(f"CSV를 읽을 수 없습니다: {csv_path}")
+
+    # 헤더 정규화: 앞뒤 공백/BOM 제거
+    df.columns = [str(c).replace("﻿", "").strip() for c in df.columns]
+
+    # 한글 헤더 → 내부 키
+    rename_map = {k: v for k, v in _MANUAL_AD_CSV_COLUMNS.items() if k in df.columns}
+    df = df.rename(columns=rename_map)
+
+    # 필수 지표 컬럼이 없으면 빈 값으로라도 채워 downstream 방어
+    for col in ("ctr", "follows", "ad_name", "fb_ad_id", "account_id"):
+        if col not in df.columns:
+            df[col] = np.nan
+
+    # 숫자 파싱: 실패 시 NaN → 0
+    for col in ("ctr", "follows", "profile_visits", "clicks", "impressions"):
+        if col in df.columns:
+            # 천단위 콤마 등 방어적으로 제거
+            cleaned = df[col].astype(str).str.replace(",", "", regex=False).str.strip()
+            df[col] = pd.to_numeric(cleaned, errors="coerce").fillna(0.0)
+
+    # 문자열 컬럼 정리 (account_id는 브랜드 자동 매칭에 사용되므로 함께 정리)
+    for col in ("ad_name", "fb_ad_id", "account_id"):
+        df[col] = df[col].astype(str).str.strip().replace({"nan": ""})
+
+    return df
+
+
+def _fetch_thumbnails_by_fb_ad_id(fb_ad_ids: list[str]) -> dict:
+    """
+    광고 ID(fb_ad_id) 기준으로 DB에서 썸네일/미디어 타입을 조회한다.
+    경로: ads.fb_ad_id → ads.source_ig_media_id
+          → ig_contents.fb_ig_media_id → ig_contents.thumbnail_url/media_url
+
+    Returns:
+        {fb_ad_id(str): {"thumbnail": str|None, "ig_media_type": str|None}}
+        DB 조회 실패 시 빈 dict (호출부에서 텍스트 폴백 처리).
+    """
+    ids = [str(i).strip() for i in fb_ad_ids if str(i).strip()]
+    if not ids:
+        return {}
+
+    query = """
+        SELECT
+            a.fb_ad_id::text                            AS fb_ad_id,
+            COALESCE(ic.thumbnail_url, ic.media_url)    AS thumbnail,
+            ic.ig_media_type                            AS ig_media_type
+        FROM ads a
+        JOIN ig_contents ic ON a.source_ig_media_id = ic.fb_ig_media_id
+        WHERE a.fb_ad_id::text = ANY(%(ids)s)
+    """
+    try:
+        engine = get_engine()
+        df = pd.read_sql(query, engine, params={"ids": ids})
+    except Exception:
+        # DB 접속/쿼리 실패는 치명적이지 않다 → 텍스트 폴백으로 진행
+        return {}
+
+    if df.empty:
+        return {}
+
+    result = {}
+    for _, row in df.iterrows():
+        key = str(row.get("fb_ad_id") or "").strip()
+        if not key or key in result:
+            continue
+        result[key] = {
+            "thumbnail":     row.get("thumbnail"),
+            "ig_media_type": row.get("ig_media_type"),
+        }
+    return result
+
+
+def get_ctr_follows_scatter_data_from_csv(csv_path: str) -> list[dict]:
+    """
+    메타 광고 관리자에서 수동 다운로드한 CSV로부터 광고(ad) 단위
+    CTR×팔로우 산점도 데이터를 생성한다. (임시 보강용)
+
+    반환 스키마는 DB 버전(get_ctr_follows_scatter_data)과 호환되도록 맞춰,
+    render_ctr_follows_quadrant_chart()를 수정 없이 재사용할 수 있게 한다.
+
+    각 dict 키:
+        ctr, follows          : 사분면 좌표 (CSV의 CTR(전체)는 이미 % 값)
+        thumbnail             : DB 매칭 성공 시 썸네일 경로, 실패 시 None
+        ig_media_type         : DB 매칭 성공 시 미디어 타입, 실패 시 ""
+        label                 : 광고 이름 (썸네일 폴백 시 텍스트로 표시)
+        fb_ad_id              : 광고 ID (대표 카드 식별자)
+    """
+    df = _read_manual_ad_csv(csv_path)
+    if df.empty:
+        return []
+
+    # 광고 ID 기준 썸네일 매칭 (실패 시 빈 dict → 텍스트 폴백)
+    thumb_map = _fetch_thumbnails_by_fb_ad_id(df["fb_ad_id"].tolist())
+
+    rows = []
+    for _, r in df.iterrows():
+        fb_ad_id = str(r.get("fb_ad_id") or "").strip()
+        ad_name  = str(r.get("ad_name") or "").strip()
+        match    = thumb_map.get(fb_ad_id, {})
+
+        rows.append({
+            "ctr":           float(pd.to_numeric(r.get("ctr"), errors="coerce") or 0.0),
+            "follows":       float(pd.to_numeric(r.get("follows"), errors="coerce") or 0.0),
+            "thumbnail":     match.get("thumbnail"),
+            "ig_media_type": match.get("ig_media_type") or "",
+            "label":         ad_name,
+            "fb_ad_id":      fb_ad_id,
+        })
+
+    return rows
+
+
+def _find_matching_manual_ad_csv(fb_ad_account_id: str, csv_dir: str = CTR_CSV_DIR) -> "str | None":
+    """
+    ctr_csv/ 폴더의 모든 CSV를 훑어서, config의 fb_ad_account_id(예: 'act_945284817907415')와
+    CSV 내부 '계정 ID' 컬럼이 일치하는 파일 경로를 찾는다.
+
+    매칭 규칙:
+        CSV의 '계정 ID' 값 앞에 'act_'를 붙이면 fb_ad_account_id와 정확히 같아야 매칭된다.
+        파일명(브랜드명.csv)은 사람이 보기 위한 라벨일 뿐이며, 매칭 로직에는 쓰이지 않는다.
+
+    여러 파일이 매칭되면 파일명 오름차순으로 첫 번째 파일을 사용한다.
+    폴더가 없거나 매칭되는 파일이 없으면 None을 반환한다(호출부에서 섹션을 건너뜀).
+    """
+    target_num = str(fb_ad_account_id or "").strip()
+    if target_num.startswith("act_"):
+        target_num = target_num[len("act_"):]
+    if not target_num or not os.path.isdir(csv_dir):
+        return None
+
+    for fname in sorted(os.listdir(csv_dir)):
+        if not fname.lower().endswith(".csv"):
+            continue
+        fpath = os.path.join(csv_dir, fname)
+        try:
+            df = _read_manual_ad_csv(fpath)
+        except Exception as e:
+            print(f"  ⚠️ ctr_csv/{fname} 읽기 실패, 건너뜀: {e}")
+            continue
+        if df.empty or "account_id" not in df.columns:
+            continue
+        account_ids = {str(v).strip() for v in df["account_id"].dropna().unique() if str(v).strip()}
+        if target_num in account_ids:
+            return fpath
+
+    return None
+
+
+def get_ctr_follows_scatter_data_auto(fb_ad_account_id: str, csv_dir: str = CTR_CSV_DIR):
+    """
+    ctr_csv/ 폴더에서 config의 fb_ad_account_id와 '계정 ID'가 일치하는 CSV를 자동으로 찾아
+    광고 단위 CTR×팔로우 산점도 데이터를 생성한다. (CLI 인자 없이 python3 main.py만으로 동작)
+
+    Returns:
+        (rows, matched_csv_path)
+        매칭되는 CSV가 없으면 ([], None)
+    """
+    matched_path = _find_matching_manual_ad_csv(fb_ad_account_id, csv_dir)
+    if not matched_path:
+        return [], None
+    return get_ctr_follows_scatter_data_from_csv(matched_path), matched_path
