@@ -2192,7 +2192,7 @@ def _draw_thumbnail_cell(ax, img_array, label_text: str = "", bg_color: str = "#
             import textwrap
             wrapped = "\n".join(textwrap.wrap(placeholder_text, width=12)) or placeholder_text
         # 기본 문구는 원본과 동일한 fontsize 9, 줄바꿈된 광고 이름은 8로 축소
-        _ph_fontsize = 9 if "\n" in placeholder_text else 8
+        _ph_fontsize = 23 if "\n" in placeholder_text else 24
         ax.text(
             0.5, 0.5, wrapped,
             ha="center", va="center",
@@ -2252,25 +2252,31 @@ def _get_quadrant_representatives(df_quad: pd.DataFrame, n_clusters: int = 2) ->
     return representatives
 
 
-def render_ctr_follows_quadrant_chart(
+def build_quadrant_panels(
     scatter_data: list[dict],
     ctr_median: float,
     follows_median: float,
-    caption: str = None,
-    out_name: str = "quadrant_chart.png",
-) -> str:
-    ctr_mean     = ctr_median
-    follows_mean = follows_median
+) -> dict:
     """
-    CTR × 팔로우 4사분면 스캐터 플롯 + K-Means 대표 콘텐츠 썸네일 레이아웃.
-    """
-    
-    import matplotlib.gridspec as gridspec
-    from matplotlib.patches import FancyBboxPatch
-    import os
+    사분면별 제목·색상·대표 콘텐츠 썸네일 "정보"만 만든다 (이미지는 그리지 않음).
 
+    이전에는 이 정보를 matplotlib으로 직접 그려 산점도와 하나의 PNG로
+    합쳤지만, 그러면 산점도 크기와 썸네일 크기가 같은 figure/GridSpec을
+    공유해서 서로 크기를 뺏고 뺏기는 문제가 있었다. 이제 이 함수는 순수
+    데이터만 반환하고, 실제 렌더링은 template.html의 HTML/CSS가 담당한다.
+    이렇게 하면 산점도(render_ctr_follows_scatter_chart)와 썸네일 레이아웃이
+    완전히 독립적으로 크기·간격을 가질 수 있다.
+
+    반환 형태:
+        {
+          "Q1": {"title": str, "color": "#hex", "bg": "#hex",
+                 "items": [{"thumbnail": str|None, "media_type": str, "fallback": str}, ...]},
+          "Q2": {...}, "Q3": {...}, "Q4": {...},
+        }
+        items는 항상 길이 2 (대표 콘텐츠가 모자라면 빈 슬롯으로 채움).
+    """
     if not scatter_data:
-        return ""
+        return {}
 
     df = pd.DataFrame(scatter_data)
     df["ctr"]     = pd.to_numeric(df["ctr"],     errors="coerce").fillna(0.0)
@@ -2288,8 +2294,74 @@ def render_ctr_follows_quadrant_chart(
     }
 
     def _quad_label(row):
-        high_ctr = row["ctr"]     > ctr_mean      # 기존 >= 에서 > 로 변경
-        high_fol = row["follows"] > follows_mean  # 기존 복합 조건에서 단순 > 로 통일
+        high_ctr = row["ctr"]     > ctr_median
+        high_fol = row["follows"] > follows_median
+        if   high_ctr and high_fol:      return "Q1"
+        elif not high_ctr and high_fol:  return "Q2"
+        elif not high_ctr and not high_fol: return "Q3"
+        else:                            return "Q4"
+    df["quad"] = df.apply(_quad_label, axis=1)
+
+    panels = {}
+    for q in ["Q1", "Q2", "Q3", "Q4"]:
+        df_q = df[df["quad"] == q].copy()
+        reps = _get_quadrant_representatives(df_q, n_clusters=2)
+
+        items = []
+        for rep in reps[:2]:
+            thumb = str(rep.get("thumbnail") or "").strip()
+            items.append({
+                "thumbnail":  thumb or None,
+                "media_type": str(rep.get("ig_media_type") or "").upper(),
+                # CSV 임시 보강 경로: 썸네일이 없으면 광고 이름(label)을 폴백 텍스트로.
+                # DB 경로에는 label 키가 없어 빈 문자열 → 템플릿에서 "이미지 없음" 표시.
+                "fallback":   str(rep.get("label") or "").strip(),
+            })
+        while len(items) < 2:
+            items.append({"thumbnail": None, "media_type": "", "fallback": ""})
+
+        panels[q] = {
+            "title": QUAD_TITLES[q],
+            "color": QUAD_COLORS[q],
+            "bg":    QUAD_BG[q],
+            "items": items,
+        }
+
+    return panels
+
+
+def render_ctr_follows_scatter_chart(
+    scatter_data: list[dict],
+    ctr_median: float,
+    follows_median: float,
+    caption: str = None,
+    out_name: str = "quadrant_scatter.png",
+    figsize: tuple = (14, 11),
+) -> str:
+    """
+    CTR × 팔로우 산점도만 단독으로 그린다 (사분면 제목·썸네일은 포함하지 않음).
+
+    사분면 제목/썸네일은 build_quadrant_panels()가 만드는 데이터를 바탕으로
+    template.html에서 HTML/CSS로 따로 그린다. 이 함수의 figsize는 그 썸네일
+    레이아웃과 완전히 독립적이라, 여기 숫자를 바꿔도 썸네일 크기에는
+    영향을 주지 않는다.
+    """
+    import os
+
+    if not scatter_data:
+        return ""
+
+    df = pd.DataFrame(scatter_data)
+    df["ctr"]     = pd.to_numeric(df["ctr"],     errors="coerce").fillna(0.0)
+    df["follows"] = pd.to_numeric(df["follows"], errors="coerce").fillna(0.0)
+
+    QUAD_COLORS = {
+        "Q1": "#2563EB", "Q2": "#16A34A", "Q3": "#9CA3AF", "Q4": "#DC2626",
+    }
+
+    def _quad_label(row):
+        high_ctr = row["ctr"]     > ctr_median
+        high_fol = row["follows"] > follows_median
         if   high_ctr and high_fol:      return "Q1"
         elif not high_ctr and high_fol:  return "Q2"
         elif not high_ctr and not high_fol: return "Q3"
@@ -2325,16 +2397,14 @@ def render_ctr_follows_quadrant_chart(
 
     # --- Y축 범위 및 눈금 ---
     if follows_max <= 0:
-        # 데이터가 모두 0일 경우 중심을 0으로 맞추고 위아래 동일한 간격(-1 ~ 1) 부여
         y_min, y_max = -1.0, 1.0
         y_ticks = [-1.0, 0.0, 1.0]
     else:
-        # 최대값이 0이 아닐 경우: 중앙값 기준으로 3개씩 위아래 분할
         y_min = -1.0
         y_step = follows_median / 3.0 if follows_median > 0 else follows_max / 3.0
         if y_step <= 0: y_step = 1.0
         y_max = follows_max + y_step
-        
+
         y_ticks = [-1.0]
         for i in range(3, 0, -1):
             v = follows_median - i * y_step
@@ -2344,28 +2414,12 @@ def render_ctr_follows_quadrant_chart(
             v = follows_median + i * y_step
             if v <= y_max: _add_tick(y_ticks, v)
 
-    #  차트 기본 사이즈
-    fig = plt.figure(figsize=(22, 10), facecolor="white")
+    fig, ax_scatter = plt.subplots(figsize=figsize, facecolor="white")
 
-    outer_gs = gridspec.GridSpec(
-        1, 3, figure=fig,
-        width_ratios=[2.5, 3.5, 2.5],         # 좌우 패널 동일 비율로 수정
-        wspace=0.06, left=0.03, right=0.97, top=0.91, bottom=0.09,
-    )
-
-    # thumbnail 행 비율 1.3/1.0의 차이를 1.2/1.2로 균등화하여
-    # Q2/Q3와 Q1/Q4의 썸네일 높이를 동일하게 유지한다.
-    inner_h = [0.18, 1.2, 0.18, 1.2]
-
-    left_inner  = outer_gs[0, 0].subgridspec(4, 2, height_ratios=inner_h, hspace=0.15, wspace=0.08)
-    right_inner = outer_gs[0, 2].subgridspec(4, 2, height_ratios=inner_h, hspace=0.15, wspace=0.08)
-
-    ax_scatter = fig.add_subplot(outer_gs[0, 1])
-
-    ax_scatter.axhspan(follows_median, y_max,  xmin=0, xmax=(ctr_median / x_max),      alpha=0.06, color=QUAD_COLORS["Q2"], zorder=0)
-    ax_scatter.axhspan(follows_median, y_max,  xmin=(ctr_median / x_max), xmax=1,      alpha=0.06, color=QUAD_COLORS["Q1"], zorder=0)
-    ax_scatter.axhspan(y_min, follows_median,  xmin=0, xmax=(ctr_median / x_max),      alpha=0.06, color=QUAD_COLORS["Q3"], zorder=0)
-    ax_scatter.axhspan(y_min, follows_median,  xmin=(ctr_median / x_max), xmax=1,      alpha=0.06, color=QUAD_COLORS["Q4"], zorder=0)
+    ax_scatter.axhspan(follows_median, y_max,  xmin=0, xmax=(ctr_median / x_max),      alpha=0.15, color=QUAD_COLORS["Q2"], zorder=0)
+    ax_scatter.axhspan(follows_median, y_max,  xmin=(ctr_median / x_max), xmax=1,      alpha=0.15, color=QUAD_COLORS["Q1"], zorder=0)
+    ax_scatter.axhspan(y_min, follows_median,  xmin=0, xmax=(ctr_median / x_max),      alpha=0.15, color=QUAD_COLORS["Q3"], zorder=0)
+    ax_scatter.axhspan(y_min, follows_median,  xmin=(ctr_median / x_max), xmax=1,      alpha=0.15, color=QUAD_COLORS["Q4"], zorder=0)
 
     ax_scatter.axvline(x=ctr_median,     color="#888888", linewidth=1.0, linestyle="--", zorder=1)
     ax_scatter.axhline(y=follows_median, color="#888888", linewidth=1.0, linestyle="--", zorder=1)
@@ -2375,86 +2429,48 @@ def render_ctr_follows_quadrant_chart(
         if df_q.empty: continue
         ax_scatter.scatter(
             df_q["ctr"], df_q["follows"],
-            color=color, alpha=0.6, edgecolors="#aaaaaa", linewidths=0.5, s=60, zorder=2,
+            color=color, alpha=0.6, edgecolors="#aaaaaa", linewidths=0.5, s=90, zorder=2,
         )
 
     for q, reps in quad_reps.items():
         for rep in reps:
             ax_scatter.scatter(
                 rep["ctr"], rep["follows"],
-                color=QUAD_COLORS[q], marker="*", s=220, edgecolors="white", linewidths=0.8, zorder=3,
+                color=QUAD_COLORS[q], marker="*", s=800, edgecolors="white", linewidths=1.2, zorder=3,
             )
 
     ax_scatter.set_xlim(0, x_max)
     ax_scatter.set_ylim(y_min, y_max)
-    ax_scatter.set_xlabel("CTR",   fontsize=11, labelpad=6, color="#333333")
-    ax_scatter.set_ylabel("팔로우", fontsize=11, labelpad=6, color="#333333")
+    ax_scatter.set_xlabel("CTR",   fontsize=20, labelpad=6, color="#333333")
+    ax_scatter.set_ylabel("팔로우", fontsize=20, labelpad=6, color="#333333")
 
     if x_ticks:
         ax_scatter.set_xticks(x_ticks)
-        ax_scatter.set_xticklabels([f"{v:.2f}" for v in x_ticks], fontsize=8, color="#555555")
+        ax_scatter.set_xticklabels([f"{v:.2f}" for v in x_ticks], fontsize=14, color="#555555")
     if y_ticks:
         ax_scatter.set_yticks(y_ticks)
-        ax_scatter.set_yticklabels([f"{int(v)}" if v == int(v) else f"{v:.1f}" for v in y_ticks], fontsize=8, color="#555555")
+        ax_scatter.set_yticklabels([f"{int(v)}" if v == int(v) else f"{v:.1f}" for v in y_ticks], fontsize=14, color="#555555")
 
     ax_scatter.tick_params(axis="both", length=3, color="#cccccc")
     for spine in ax_scatter.spines.values():
         spine.set_edgecolor("#dddddd")
     ax_scatter.grid(False)
 
-    panel_map = [
-        (left_inner,  0, 1, "Q2"),
-        (left_inner,  2, 3, "Q3"),
-        (right_inner, 0, 1, "Q1"),
-        (right_inner, 2, 3, "Q4"),
-    ]
-
-    for inner, t_row, th_row, q in panel_map:
-        color  = QUAD_COLORS[q]
-        bg     = QUAD_BG[q]
-        reps   = quad_reps[q]
-        title  = QUAD_TITLES[q]
-
-        ax_title = fig.add_subplot(inner[t_row, :])
-        ax_title.axis("off")
-        ax_title.set_facecolor(bg)
-        ax_title.text(0.5, 0.5, title, ha="center", va="center", fontsize=9, fontweight="bold", color=color, transform=ax_title.transAxes)
-        ax_title.add_patch(FancyBboxPatch((0, 0), 1, 1, boxstyle="round,pad=0.01", facecolor=bg, edgecolor=color, linewidth=0.8, transform=ax_title.transAxes, clip_on=False))
-
-        for col_idx in range(2):
-            ax_th = fig.add_subplot(inner[th_row, col_idx])
-            if col_idx < len(reps):
-                rep      = reps[col_idx]
-                thumb    = str(rep.get("thumbnail") or "").strip()
-                img_arr  = _load_thumbnail_array(thumb) if thumb else None
-                media_type = str(rep.get("ig_media_type") or "").upper()
-                # CSV 임시 보강 경로: 썸네일 매칭 실패 시 광고 이름(label)을 폴백 텍스트로 표시.
-                # DB 경로에는 label 키가 없으므로 기본 "이미지 없음"이 유지된다.
-                fallback = str(rep.get("label") or "").strip()
-                _draw_thumbnail_cell(
-                    ax_th, img_arr, label_text=media_type, bg_color=bg,
-                    placeholder_text=(fallback or "이미지\n없음"),
-                )
-            else:
-                _draw_thumbnail_cell(ax_th, None, label_text="", bg_color="#f5f5f5")
-
-    fig.suptitle("", visible=False)
-
-    # caption: CSV 임시 보강 경로에서 기준선/데이터 출처 안내 문구를 표시한다.
-    # (기본값 None → 기존 DB 경로 출력은 그대로 유지)
     if caption:
         fig.text(
-            0.5, 0.015, caption,
+            0.5, 0.01, caption,
             ha="center", va="bottom",
             fontsize=9, color="#999999",
         )
 
+    fig.tight_layout(pad=1.2)
+
     out_dir = "static"
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
-        
+
     out_file = os.path.join(out_dir, out_name)
-    fig.savefig(out_file, format="png", dpi=120, bbox_inches="tight", facecolor="white")
+    fig.savefig(out_file, format="png", dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    
+
     return f"./{out_file}"

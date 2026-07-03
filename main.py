@@ -8,10 +8,10 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 import pandas as pd
 from scripts.processor import (_normalize_keyword_by_pos, _best_adverb_score, kiwi, VERB_ADJ_TAGS,
-                               get_ctr_follows_scatter_data_auto)
+                               get_ctr_follows_scatter_data_auto, filter_follow_outliers)
 from scripts.visualizer import (build_color_map, complementary_hex, render_dataset, is_dark_color, 
                                 render_bubble_chart, render_purchase_pie_chart, render_follower_gender_doughnut_chart, render_follower_age_gender_stacked_barh_chart,
-                                render_target_spend_pie_charts, render_ctr_follows_quadrant_chart,)
+                                render_target_spend_pie_charts, render_ctr_follows_scatter_chart, build_quadrant_panels,)
 from scripts.reporter import generate_html
 from scripts.to_json import run as generate_json
 import time
@@ -506,10 +506,10 @@ def run():
     start_time = time.time()
 
     config = {
-        "target_id": "22", # account_id
-        "fb_ad_account_id":"act_1405475181306250",
+        "target_id": "21", # account_id
+        "fb_ad_account_id":"act_1622583648427159",
         "start":"2025-12-29", #YYYY-MM-DD
-        "end": "2026-06-29",
+        "end": "2026-06-28",
         "main_age": ["25-34", "35-44"],
         "main_gender": "", # male, female
         "avoid_age": "",
@@ -532,7 +532,7 @@ def run():
                     avoid_age=avoid_age, avoid_gender=avoid_gender)
     
     report_path = "json_reports/integrated_report.json"
-    theme_color = "#1C57AD"
+    theme_color = "#1D72FF"
 
     report_json = _load_report(report_path)
     _apply_display_predicate_suffix(report_json)
@@ -769,6 +769,7 @@ def run():
 
     # quadrant_chart_b64 초기화: 조건을 통과하지 못하면 빈 문자열 그대로 유지된다.
     quadrant_chart_b64 = ""
+    quadrant_panels = {}
 
     # scatter_fol_mean이 None이거나 0이면 팔로워 지표가 없는 기간이므로 차트를 생성하지 않는다.
     # - None: 산점도 데이터 자체가 없는 경우
@@ -776,7 +777,12 @@ def run():
     # 두 조건을 모두 통과한 경우(값이 있고 0보다 큰 경우)에만 차트를 렌더링한다.
     # (기준선은 "선택 기간(start~end) 전체 평균" — 이전 분기 평균 아님)
     if scatter_fol_mean is not None and scatter_fol_mean != 0:
-        quadrant_chart_b64 = render_ctr_follows_quadrant_chart(
+        quadrant_chart_b64 = render_ctr_follows_scatter_chart(
+            scatter_data  = scatter_rows,
+            ctr_median    = scatter_ctr_mean,
+            follows_median= scatter_fol_mean,
+        )
+        quadrant_panels = build_quadrant_panels(
             scatter_data  = scatter_rows,
             ctr_median    = scatter_ctr_mean,
             follows_median= scatter_fol_mean,
@@ -789,8 +795,11 @@ def run():
     # 자동으로 찾아 쓴다. 파일명(브랜드명.csv)은 라벨일 뿐 매칭에 쓰이지 않는다.
     # 매칭되는 CSV가 없으면 이 섹션은 조용히 건너뛰고 기존 DB 사분면만 그대로 나간다.
     # 추후 API 연동 시 이 블록을 제거/교체한다.
-    manual_quadrant = {"image": "", "ctr_mean": None, "follows_mean": None, "notice": ""}
+    manual_quadrant = {"image": "", "panels": {}, "ctr_mean": None, "follows_mean": None, "notice": ""}
     manual_rows, matched_csv_path = get_ctr_follows_scatter_data_auto(config["fb_ad_account_id"])
+    # 팔로우 "대박" 튐 콘텐츠 제외 (CTR은 그대로 둔다). 저성과 계정은
+    # 안 잘림(조건1), 그 외엔 팔로우 51 이상만 제외(조건2).
+    manual_rows = filter_follow_outliers(manual_rows)
 
     if matched_csv_path:
         print(f"[임시] ctr_csv/ 폴더에서 계정 매칭 CSV 발견: {matched_csv_path}")
@@ -804,17 +813,23 @@ def run():
                 manual_fol_mean = float(pd.to_numeric(manual_df["follows"], errors="coerce").fillna(0.0).mean())
 
                 manual_notice = (
-                    "※ 메타 광고 관리자에서 수동 다운로드한 임시 데이터 기반 (API 연동 시 교체 예정)"
+                    ""
                 )
-                manual_image = render_ctr_follows_quadrant_chart(
+                manual_image = render_ctr_follows_scatter_chart(
                     scatter_data  = manual_rows,
                     ctr_median    = manual_ctr_mean,
                     follows_median= manual_fol_mean,
-                    caption       = "기준선: 선택 기간 전체 평균 기준  |  " + manual_notice,
-                    out_name      = "quadrant_chart_manual.png",
+                    caption       = "" + manual_notice,
+                    out_name      = "quadrant_scatter_manual.png",
+                )
+                manual_panels = build_quadrant_panels(
+                    scatter_data  = manual_rows,
+                    ctr_median    = manual_ctr_mean,
+                    follows_median= manual_fol_mean,
                 )
                 manual_quadrant = {
                     "image":        manual_image,
+                    "panels":       manual_panels,
                     "ctr_mean":     manual_ctr_mean,
                     "follows_mean": manual_fol_mean,
                     "notice":       manual_notice,
@@ -941,6 +956,7 @@ def run():
        
         "quadrant_chart": {
             "image":       quadrant_chart_b64,
+            "panels":      quadrant_panels,
             "ctr_mean":    scatter_ctr_mean,     # median → mean
             "follows_mean": scatter_fol_mean,    # median → mean
         },

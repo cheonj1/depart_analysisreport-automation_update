@@ -61,6 +61,10 @@ body {
   padding: 12mm 14mm 24mm 14mm;
 }
 
+.page.quadrant-page {
+  padding: 14mm 26mm 20mm 26mm;
+}
+
 .page + .page {
   break-before: page;
   page-break-before: always;
@@ -1377,15 +1381,117 @@ body {
 }
 
 
-/* 4사분면 차트 — 컨테이너를 꽉 채워 선명하게 출력 (BUG-03) */
-.quadrant-chart-container {
-  width: 100%;
-  display: block;
+/* =========================================================
+   4사분면 차트 — 산점도(matplotlib PNG)와 썸네일/제목(HTML+CSS) 분리
+   레이아웃. 예전엔 이 둘이 matplotlib 하나의 GridSpec 안에 같이
+   그려져서, 산점도를 키우면 썸네일이 줄고 썸네일을 키우면 산점도가
+   줄어드는 제로섬 구조였다. 이제는 완전히 독립된 CSS 영역이라
+   아래 3개 블록(레이아웃 비율 / 산점도 / 썸네일)을 각각 따로
+   조정해도 서로 영향을 주지 않는다.
+   ========================================================= */
+
+/* 1) 좌측 썸네일 : 산점도 : 우측 썸네일 폭 비율 — 여기 숫자만 바꾸면
+      전체 레이아웃 비율이 바뀐다 (산점도 자체 크기와는 무관). */
+.quadrant-layout {
+  display: grid;
+  grid-template-columns: 0.75fr 1.25fr 0.75fr;
+  column-gap: 5mm;
+  align-items: center;
+  height: 100%;
 }
-.quadrant-chart-container img {
+
+/* 2) 산점도(matplotlib PNG) 표시 영역 — max-height로 페이지를
+      넘지 않게만 막고, 안에서 비율을 유지한 채 최대한 크게 표시.
+      visualizer.py의 figsize를 바꿔도 이 규칙 안에서만 반영된다. */
+.quadrant-scatter {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  max-height: 780pt;
+  overflow: hidden;
+}
+.quadrant-scatter img {
   width: 100%;
   height: auto;
+  max-height: 100%;
+  object-fit: contain;
   display: block;
+}
+
+/* 3) 좌/우 썸네일 컬럼 — 사분면 2개(제목+썸네일2개)를 위아래로 배치.
+      row-gap이 "사분면 블록 간" 세로 간격. */
+.quadrant-side {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  row-gap: 8mm;
+  height: 100%;
+}
+
+/* 4) 사분면 블록 하나 (제목 1개 + 썸네일 2개). gap이 "제목-썸네일 간격". */
+.quadrant-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
+  height: 100%;
+  justify-content: center;
+}
+.quadrant-block__title {
+  text-align: center;
+  font-size: 18pt;
+  font-weight: 700;
+  padding: 2mm 3mm;
+  border: 1px solid;
+  border-radius: 2mm;
+  flex: 0 0 auto;
+}
+/* 썸네일 2개 사이 가로 간격 — gap만 바꾸면 됨 (제목/산점도와 무관). */
+.quadrant-block__thumbs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5mm;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* 썸네일 크기 자체 — 4:5 비율 고정, 셀 폭에 맞춰 자동으로 커짐/작아짐.
+   (이전엔 matplotlib aspect-lock 때문에 폭/높이를 같이 안 맞추면
+   안 커지는 문제가 있었는데, CSS aspect-ratio는 그런 문제가 없다) */
+.quadrant-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: 1.5mm;
+  background: #f0f0f0;
+}
+.quadrant-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+.quadrant-thumb__label {
+  position: absolute;
+  bottom: 1mm;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 7.5pt;
+  color: #555;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 0.5mm 2mm;
+  border-radius: 3mm;
+  white-space: nowrap;
+}
+.quadrant-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 8pt;
+  text-align: center;
+  padding: 3mm;
+  line-height: 1.3;
 }
 
 /* 썸네일 — 4:5 비율 강제 고정 (찌그러짐 없이 크롭) */

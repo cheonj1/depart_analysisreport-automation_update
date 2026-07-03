@@ -2867,6 +2867,42 @@ def get_ctr_follows_scatter_data(account_id: int, date_start: str, date_end: str
     return df.to_dict("records")
 
 
+# ─────────────────────────────────────────────────────────────
+# 사분면 "튀는 콘텐츠(팔로우 대박)" 제외 규칙
+#
+# 콘텐츠 중 가끔 팔로우가 유독 크게 튀는 게 나오면 그 점 하나 때문에
+# 사분면 축 전체가 늘어나 모양이 찌그러진다. CTR은 그대로 두고
+# 팔로우만, 아래 두 조건으로 판단한다(ctr_csv 3개 브랜드로 검증 완료:
+# IQR 1.75배 기준보다 덜 잘리면서도 진짜 "대박" 콘텐츠는 그대로 잡힘).
+# ─────────────────────────────────────────────────────────────
+
+def filter_follow_outliers(
+    rows: list[dict],
+    low_engagement_max: float = 20,
+    cutoff: float = 50,
+) -> list[dict]:
+    """
+    사분면 산점도용 팔로우 이상치 제외.
+
+    조건1: 이 계정(브랜드) 전체 콘텐츠의 팔로우 최댓값이 low_engagement_max
+           미만이면 컷오프를 적용하지 않고 원본 그대로 반환한다.
+           (팔로우가 원래 거의 안 나오는 저성과 계정에서는 통계적 이상치
+            판단이 정상 콘텐츠를 잘못 걸러내는 경우가 많아서 두는 안전장치)
+    조건2: 그 외에는 팔로우가 cutoff를 초과하는(51 이상) 행만 제외한다.
+           cutoff 자체(50)는 포함 — 즉 50은 살아남고 51부터 제외된다.
+
+    CTR은 이 함수에서 건드리지 않는다.
+    """
+    if not rows:
+        return rows
+
+    follows_values = [float(r.get("follows") or 0) for r in rows]
+    if max(follows_values) < low_engagement_max:
+        return rows
+
+    return [row for row, f in zip(rows, follows_values) if f <= cutoff]
+
+
 def get_prev_quarter_ctr_follows_means(account_id: int, date_start: str) -> dict:
     """
     사분면 십자선 기준값 산출.
@@ -3022,7 +3058,7 @@ def get_ctr_follows_scatter_data_from_csv(csv_path: str) -> list[dict]:
     CTR×팔로우 산점도 데이터를 생성한다. (임시 보강용)
 
     반환 스키마는 DB 버전(get_ctr_follows_scatter_data)과 호환되도록 맞춰,
-    render_ctr_follows_quadrant_chart()를 수정 없이 재사용할 수 있게 한다.
+    render_ctr_follows_scatter_chart() / build_quadrant_panels()를 수정 없이 재사용할 수 있게 한다.
 
     각 dict 키:
         ctr, follows          : 사분면 좌표 (CSV의 CTR(전체)는 이미 % 값)

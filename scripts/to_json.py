@@ -19,7 +19,7 @@ from scripts.processor import (
     has_revenue_data, get_spend_and_revenue_weekly, get_spend_and_revenue_monthly,  # 광고/매출금액 추가
     has_follower_demographics_data, get_follower_demographics_latest_date, get_demographics_ratio, get_follower_age_gender_known_only, get_age_known_unknown_by_age, get_follower_age_gender_distribution,  # 팔로워 인구통계 추가
     get_target_spend_distribution, 
-    get_ctr_follows_scatter_data,  # 사분면 기준선은 이제 선택 기간 전체 평균으로 계산(별도 함수 불필요)
+    get_ctr_follows_scatter_data, filter_follow_outliers,  # 사분면 기준선은 선택 기간 전체 평균으로 계산
     get_prev_quarter_organic_avg, get_prev_quarter_profile_visits_avg, get_prev_quarter_ctr_avg, get_quarter_info,
 )
 
@@ -847,6 +847,9 @@ def run(target_id, fb_ad_account_id, start, end, main_age="", main_gender="", av
     # 기준선 = "이전 분기 평균"이 아니라 선택 기간(start~end) 전체 평균으로 통일.
     # (수동 CSV 기반 사분면과 동일한 규칙 — 전체 기간 평균 기준)
     scatter_rows = get_ctr_follows_scatter_data(target_id, start, end)
+    # 팔로우 "대박" 튐 콘텐츠 제외 (CTR은 그대로 둔다). 저성과 계정은
+    # 안 잘림(조건1), 그 외엔 팔로우 51 이상만 제외(조건2).
+    scatter_rows = filter_follow_outliers(scatter_rows)
 
     if scatter_rows:
         _scatter_df = pd.DataFrame(scatter_rows)

@@ -18,19 +18,6 @@
     }
   </style>
   {% endif %}
-  <style>
-    .quadrant-chart-container {
-      width: 100%;
-      max-width: 100%;
-      overflow: hidden;
-    }
-    .quadrant-chart-container img {
-      width: 100% !important;
-      height: auto !important;
-      display: block;
-      max-width: 100%;
-    }
-  </style>
 </head>
 
 <body>
@@ -61,6 +48,33 @@
       <div class="title-block__subtitle">{{ subtitle }}</div>
     {% endif %}
   </div>
+  {% endmacro %}
+
+  {# CTR×팔로우 사분면의 "제목 + 대표 콘텐츠 썸네일 2개" 블록.
+     산점도(matplotlib PNG)와는 완전히 분리된 순수 HTML/CSS라서
+     여기 크기·간격은 산점도 쪽에 전혀 영향을 주지 않는다. #}
+  {% macro quadrant_panel(panel) %}
+  {% if panel %}
+  <div class="quadrant-block">
+    <div class="quadrant-block__title" style="background:{{ panel.bg }}; border-color:{{ panel.color }}; color:{{ panel.color }};">
+      {{ panel.title }}
+    </div>
+    <div class="quadrant-block__thumbs">
+      {% for item in panel['items'] %}
+        {% if item.thumbnail %}
+        <div class="quadrant-thumb">
+          <img src="{{ item.thumbnail }}" alt="{{ item.media_type }}">
+          {% if item.media_type %}<span class="quadrant-thumb__label">{{ item.media_type }}</span>{% endif %}
+        </div>
+        {% else %}
+        <div class="quadrant-thumb quadrant-thumb--empty" style="background:{{ panel.bg }};">
+          <span>{{ item.fallback or '이미지 없음' }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   {% endmacro %}
 
   {% macro figure(img_src=None, caption=None, alt='', class_name='') %}
@@ -793,24 +807,33 @@
   {% endif %}
 
 
+  {# 산점도(matplotlib PNG)와 썸네일/제목(HTML+CSS)을 분리한 레이아웃.
+     .quadrant-layout / .quadrant-side / .quadrant-scatter 크기 비율은
+     report.css에서 조정하며, 서로 완전히 독립적으로 크기를 바꿀 수 있다. #}
   {% if quadrant_chart.image %}
   <section class="page quadrant-page">
     {{ page_header('콘텐츠 성과') }}
     {{ big_title('CTR × 팔로우 4사분면') }}
-    
+
     <div class="page-body">
-      <div class="span-12 quadrant-chart-container" style="display: flex; justify-content: center; padding-top: 4mm;">
-        <img
-          src="{{ quadrant_chart.image | safe }}"
-          alt="CTR × 팔로우 4사분면"
-          style="width: 100%; max-width: 2000px; height: auto; display: block; margin: 0 auto;"
-        />
+      <div class="span-12 quadrant-layout">
+        <div class="quadrant-side">
+          {{ quadrant_panel(quadrant_chart.panels.Q2) }}
+          {{ quadrant_panel(quadrant_chart.panels.Q3) }}
+        </div>
+        <div class="quadrant-scatter">
+          <img src="{{ quadrant_chart.image | safe }}" alt="CTR × 팔로우 4사분면 산점도">
+        </div>
+        <div class="quadrant-side">
+          {{ quadrant_panel(quadrant_chart.panels.Q1) }}
+          {{ quadrant_panel(quadrant_chart.panels.Q4) }}
+        </div>
       </div>
     </div>
   </section>
   {% endif %}
 
-  {# [임시 보강] 수동 CSV 기반 광고 단위 CTR × 팔로우 사분면 (--manual-ad-csv 지정 시에만 노출).
+  {# [임시 보강] 수동 CSV 기반 광고 단위 CTR × 팔로우 사분면 (ctr_csv/ 계정 매칭 시에만 노출).
      추후 Meta API 연동 시 이 섹션을 제거/교체한다. #}
   {% if manual_quadrant_chart and manual_quadrant_chart.image %}
   <section class="page quadrant-page">
@@ -818,15 +841,23 @@
     {{ big_title('광고 단위 CTR × 팔로우 4사분면') }}
 
     <div class="page-body">
+      {% if manual_quadrant_chart.notice %}
       <div style="text-align: center; color: #999999; font-size: 9pt; margin-bottom: 3mm;">
         {{ manual_quadrant_chart.notice }}
       </div>
-      <div class="span-12 quadrant-chart-container" style="display: flex; justify-content: center; padding-top: 2mm;">
-        <img
-          src="{{ manual_quadrant_chart.image | safe }}"
-          alt="광고 단위 CTR × 팔로우 4사분면 (임시 데이터)"
-          style="width: 100%; max-width: 2000px; height: auto; display: block; margin: 0 auto;"
-        />
+      {% endif %}
+      <div class="span-12 quadrant-layout">
+        <div class="quadrant-side">
+          {{ quadrant_panel(manual_quadrant_chart.panels.Q2) }}
+          {{ quadrant_panel(manual_quadrant_chart.panels.Q3) }}
+        </div>
+        <div class="quadrant-scatter">
+          <img src="{{ manual_quadrant_chart.image | safe }}" alt="광고 단위 CTR × 팔로우 4사분면 산점도 (임시 데이터)">
+        </div>
+        <div class="quadrant-side">
+          {{ quadrant_panel(manual_quadrant_chart.panels.Q1) }}
+          {{ quadrant_panel(manual_quadrant_chart.panels.Q4) }}
+        </div>
       </div>
     </div>
   </section>
