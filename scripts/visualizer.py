@@ -2395,24 +2395,33 @@ def render_ctr_follows_scatter_chart(
         v = ctr_median + i * x_step
         if v <= x_max: _add_tick(x_ticks, v)
 
-    # --- Y축 범위 및 눈금 ---
+    # --- Y축 범위 및 눈금 (팔로우: 전부 정수, 최저값 -1 고정) ---
     if follows_max <= 0:
         y_min, y_max = -1.0, 1.0
-        y_ticks = [-1.0, 0.0, 1.0]
+        y_ticks = [-1, 0, 1]
     else:
-        y_min = -1.0
-        y_step = follows_median / 3.0 if follows_median > 0 else follows_max / 3.0
-        if y_step <= 0: y_step = 1.0
-        y_max = follows_max + y_step
+        y_min = -1
+        mean_int = int(follows_median)            # 평균은 소숫점 버리고 정수로 (내림)
+        max_int = int(round(follows_max))
+        if max_int <= mean_int:
+            max_int = mean_int + 1                 # 역전/0나눔 방지용 안전장치
 
-        y_ticks = [-1.0]
-        for i in range(3, 0, -1):
-            v = follows_median - i * y_step
-            if v >= 0: _add_tick(y_ticks, v)
-        _add_tick(y_ticks, follows_median)
-        for i in range(1, 4):
-            v = follows_median + i * y_step
-            if v <= y_max: _add_tick(y_ticks, v)
+        y_ticks = [y_min]
+        step_low = (mean_int - y_min) / 3.0        # -1 ~ 평균 사이 2개
+        if step_low > 0:
+            for i in (1, 2):
+                _add_tick(y_ticks, round(y_min + i * step_low))
+        _add_tick(y_ticks, mean_int)
+
+        step_high = (max_int - mean_int) / 3.0     # 평균 ~ 최댓값 사이 2개
+        if step_high > 0:
+            for i in (1, 2):
+                _add_tick(y_ticks, round(mean_int + i * step_high))
+        _add_tick(y_ticks, max_int)
+
+        y_ticks = sorted(set(int(round(v)) for v in y_ticks))
+        pad = max(1, round(step_high / 4)) if step_high > 0 else 1
+        y_max = max_int + pad
 
     fig, ax_scatter = plt.subplots(figsize=figsize, facecolor="white")
 
@@ -2436,7 +2445,7 @@ def render_ctr_follows_scatter_chart(
         for rep in reps:
             ax_scatter.scatter(
                 rep["ctr"], rep["follows"],
-                color=QUAD_COLORS[q], marker="*", s=800, edgecolors="white", linewidths=1.2, zorder=3,
+                color=QUAD_COLORS[q], marker="*", s=1500, edgecolors="white", linewidths=1.2, zorder=3,
             )
 
     ax_scatter.set_xlim(0, x_max)
@@ -2449,7 +2458,7 @@ def render_ctr_follows_scatter_chart(
         ax_scatter.set_xticklabels([f"{v:.2f}" for v in x_ticks], fontsize=14, color="#555555")
     if y_ticks:
         ax_scatter.set_yticks(y_ticks)
-        ax_scatter.set_yticklabels([f"{int(v)}" if v == int(v) else f"{v:.1f}" for v in y_ticks], fontsize=14, color="#555555")
+        ax_scatter.set_yticklabels([f"{int(v)}" for v in y_ticks], fontsize=14, color="#555555")
 
     ax_scatter.tick_params(axis="both", length=3, color="#cccccc")
     for spine in ax_scatter.spines.values():

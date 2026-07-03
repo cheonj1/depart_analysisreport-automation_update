@@ -25,3 +25,6 @@ report.html
 # claude
 CLAUDE.md
 .claude/
+
+# brand_csv
+ctr_csv/

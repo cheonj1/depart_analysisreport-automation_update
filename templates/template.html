@@ -64,7 +64,6 @@
         {% if item.thumbnail %}
         <div class="quadrant-thumb">
           <img src="{{ item.thumbnail }}" alt="{{ item.media_type }}">
-          {% if item.media_type %}<span class="quadrant-thumb__label">{{ item.media_type }}</span>{% endif %}
         </div>
         {% else %}
         <div class="quadrant-thumb quadrant-thumb--empty" style="background:{{ panel.bg }};">
