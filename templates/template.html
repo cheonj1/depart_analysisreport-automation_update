@@ -294,7 +294,7 @@
 
     {% set top = purchase_summary_page.top_content %}
     <div class="page-body page-body--purchase-summary">
-      <div class="span-12 purchase-summary__row">
+      <div class="span-12 purchase-summary__row{% if not purchase_summary_page.has_roas_data %} purchase-summary__row--no-roas{% endif %}">
         <div class="overview-kpi">
           <div class="overview-kpi__value">{{ purchase_summary_page.total_purchases }}건</div>
           <div class="overview-kpi__label">총 구매전환</div>

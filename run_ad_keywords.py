@@ -59,6 +59,10 @@ _KIWI_EXCLUDE_TAGS = {
     "SL",  # 외국어(영어) → _extract_english 단계에서 lemmatization 포함 처리
     "SN",  # 숫자
 }
+# 추출 단계에서 차단할 한국어 불용어 (키워드로 부적합한 부사·의존명사 등)
+_KOREAN_STOPWORDS = {
+    "그동안",   # 시간 부사
+}
 
 
 def env_bool(name: str, default: str = "false") -> bool:
@@ -205,6 +209,18 @@ class AdNounExtractor:
                                 i += 2
                                 merged = True
                                 break
+                            # 사전에 없는 복합 명사(예: 메디컬리티, 프로틴): 재분석 결과가
+                            # NNG/NNP/XR 2형태소 이하이고 3자 이상이면 NNP로 병합
+                            elif (len(combined) >= 3
+                                  and len(toks) <= 2
+                                  and all(str(tk.tag) in {"NNG", "NNP", "XR"} for tk in toks)):
+                                norm = combined.lower()
+                                if len(combined) >= 2 and norm not in seen and not norm.isdigit():
+                                    result.append(combined)
+                                    seen.add(norm)
+                                i += 2
+                                merged = True
+                                break
                         if merged:
                             continue
 
@@ -215,6 +231,9 @@ class AdNounExtractor:
             cleaned = re.sub(r"[^가-힣a-zA-Z0-9]", "", t.form)
             norm = cleaned.lower()
             if len(cleaned) < 2 or not norm or norm in seen or norm.isdigit():
+                i += 1
+                continue
+            if cleaned in _KOREAN_STOPWORDS:
                 i += 1
                 continue
             result.append(cleaned)
@@ -409,6 +428,8 @@ def main():
         "아우터", "이너웨어", "레이어드", "니트웨어", "캐주얼웨어",
         "스킨케어", "헤어케어", "바디케어", "선케어",
         "오버핏", "슬림핏", "레귤러핏",
+        "프로바이오틱스",   # 하이굿: '프로바이오틱스로' → '스로' 단편 방지
+        "캐치드로우",       # '캐치드'+'로우'로 분리되는 오분석 방지
     ]
     raw_custom_dict = os.environ.get("CUSTOM_DICT", "")
     custom_dict = _BASE_FASHION_DICT + [w.strip() for w in raw_custom_dict.split(",") if w.strip()]

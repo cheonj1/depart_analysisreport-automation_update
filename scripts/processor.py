@@ -127,12 +127,13 @@ def get_ad_period(account_id, date_start, date_end):
         FROM ads ad
         JOIN ad_sets ads ON ad.ad_set_id = ads.id
         JOIN campaigns c ON ads.campaign_id = c.id
+        JOIN ad_performance_daily apd ON ad.id = apd.ad_id
         WHERE ad.account_id = {account_id}
-            AND ad.fb_created_time >= '{date_start}'
-            AND ad.fb_created_time <= DATE_TRUNC('week', '{date_end}'::date)::date
-            AND ({account_id} IN (3, 2, 26) OR 
-                c.name ILIKE '%%depart%%' 
-                OR c.name LIKE '%%디파트%%' 
+            AND apd.as_of_date >= '{date_start}'
+            AND apd.as_of_date <= DATE_TRUNC('week', '{date_end}'::date)::date
+            AND ({account_id} IN (3, 2, 26) OR
+                c.name ILIKE '%%depart%%'
+                OR c.name LIKE '%%디파트%%'
                 OR c.name ILIKE '%%de;part%%')
     """
     df = pd.read_sql(query, engine)
@@ -1016,6 +1017,10 @@ _EN_FORCE_VERB_ADJ = frozenset({
     "avoid", "refresh", "repaint", "longer", "shorter", "faster", "slower",
     "online", "offline", "trendy", "thank", "upgrade", "update",
 })
+# kiwi가 XR 어근을 NNG로 오분류해 명사 버킷에 들어가는 형용사/동사 어간 직접 지정
+_KO_FORCE_VERB_ADJ = frozenset({
+    "거창하", "거창",   # 거창하다(VA) — kiwi가 '거창'을 XR 어근으로 분리해 NNG 오분류
+})
 
 _nltk_path_ready = False
 
@@ -1232,6 +1237,14 @@ def _normalize_keyword_by_pos(text, pos_type='noun'):
 
     noun_best = _pick_best_candidate(candidates, NOUN_TAGS)
     verb_adj_best = _pick_best_candidate(candidates, VERB_ADJ_TAGS)
+
+    # 한국어 형용사/동사 강제 목록: kiwi 분석과 무관하게 명사 차단 + 형용사/동사 버킷으로 강제
+    cleaned_text = str(text).strip()
+    if cleaned_text in _KO_FORCE_VERB_ADJ:
+        if pos_type == "noun":
+            return None
+        if pos_type == "verb_adj":
+            return cleaned_text
 
     if pos_type == "noun":
         if noun_best is None:

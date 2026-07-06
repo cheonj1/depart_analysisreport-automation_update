@@ -761,6 +761,10 @@ body {
   width: 100%;
 }
 
+.purchase-summary__row--no-roas {
+  grid-template-columns: 1fr 1fr;
+}
+
 /* KPI 수치/라벨을 이 페이지 전용으로 키움 */
 .page-body--purchase-summary .overview-kpi__value {
   font-size: 96pt;
