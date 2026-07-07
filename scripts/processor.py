@@ -60,7 +60,34 @@ def get_account_name(account_id):
 
 # ----------------------------------
 
-# 총 광고 개수 
+# ad_performance_daily 실제 마지막 적재일
+def get_last_collected_date(account_id, date_start, date_end):
+    """ad_performance_daily에 실제 노출/지출이 발생한 마지막 as_of_date를 반환한다 (계정/캠페인 화이트리스트, date_start~date_end 범위 내).
+
+    노출/지출이 전혀 없는(모두 0인) row는 실제 데이터가 아니라 ETL 상의 빈 스텁 row일 수 있으므로 제외한다.
+    """
+    engine = get_engine()
+    query = f"""
+        SELECT MAX(apd.as_of_date) AS last_date
+        FROM ad_performance_daily apd
+        JOIN ads a ON apd.ad_id = a.id
+        JOIN ad_sets ads ON a.ad_set_id = ads.id
+        JOIN campaigns c ON ads.campaign_id = c.id
+        WHERE a.account_id = {account_id}
+          AND apd.as_of_date >= '{date_start}'
+          AND apd.as_of_date <= '{date_end}'
+          AND (apd.impressions > 0 OR apd.spend > 0)
+          AND ({account_id} IN (3, 2, 26)
+              OR c.name ILIKE '%%depart%%'
+              OR c.name LIKE '%%디파트%%'
+              OR c.name ILIKE '%%de;part%%')
+    """
+    df = pd.read_sql(query, engine)
+    if df.empty or pd.isna(df.loc[0, "last_date"]):
+        return None
+    return str(df.loc[0, "last_date"])
+
+# 총 광고 개수
 def get_active_ad_count(account_id, date_start, date_end):
     """해당 기간 동안 노출이 1회라도 발생한 광고(ad_id)의 총 개수를 반환"""
     engine = get_engine()
@@ -90,24 +117,26 @@ def get_active_ad_count(account_id, date_start, date_end):
 
 # 총 콘텐츠 개수
 def get_total_content_count(account_id, date_start, date_end):
-    """해당 기간 동안 업로드된 광고 콘텐츠(광고별 ig_permalink)의 총 개수를 반환"""
+    """해당 기간 동안 성과가 발생한 광고에 연결된 콘텐츠(source_ig_media_id)의 총 개수를 반환"""
     engine = get_engine()
 
+    # get_content_period()와 동일하게 ad_performance_daily 기준으로 대상 광고를 특정합니다.
     query = f"""
-        SELECT COUNT(DISTINCT ig.ig_permalink) as content_count
+        SELECT COUNT(DISTINCT ad.source_ig_media_id) as content_count
         FROM ads ad
         JOIN ad_sets ads ON ad.ad_set_id = ads.id
         JOIN campaigns c ON ads.campaign_id = c.id
+        JOIN ad_performance_daily apd ON ad.id = apd.ad_id
         JOIN ig_contents ig
             ON ad.source_ig_media_id = ig.fb_ig_media_id
         WHERE ad.account_id = {account_id}
             AND ig.ig_permalink IS NOT NULL
             AND ig.ig_timestamp IS NOT NULL
-            AND (ig.ig_timestamp AT TIME ZONE 'Asia/Seoul')::date >= '{date_start}'::date
-            AND (ig.ig_timestamp AT TIME ZONE 'Asia/Seoul')::date <= (DATE_TRUNC('week', '{date_end}'::date) - INTERVAL '1 day')::date
+            AND apd.as_of_date >= '{date_start}'
+            AND apd.as_of_date <= DATE_TRUNC('week', '{date_end}'::date)::date
             AND ({account_id} IN (3, 2, 26)
-                OR c.name ILIKE '%%depart%%' 
-                OR c.name LIKE '%%디파트%%' 
+                OR c.name ILIKE '%%depart%%'
+                OR c.name LIKE '%%디파트%%'
                 OR c.name ILIKE '%%de;part%%')
     """
 
@@ -775,6 +804,55 @@ def get_reaction_metric_avg(account_id, date_start, date_end, metric='likes'):
     if result.empty or pd.isna(result['metric_avg'].iloc[0]):
         return 0.0
     return float(result['metric_avg'].iloc[0])
+
+
+def log_missing_reaction_insights(account_id, date_start, date_end):
+    """
+    리포트 기간 내 분석 대상 게시물(source_ig_media_id 기준) 중
+    ig_content_insights에 데이터가 전혀 없는 게시물을 찾아 콘솔에 로그로 표시한다.
+    """
+    engine = get_engine()
+
+    query = f"""
+        SELECT DISTINCT ON (ig.fb_ig_media_id)
+            ad.id AS ad_id,
+            ad.source_ig_media_id,
+            ig.id AS content_id,
+            ig.ig_timestamp,
+            ig.caption
+        FROM ads ad
+        JOIN ad_sets ads ON ad.ad_set_id = ads.id
+        JOIN campaigns c ON ads.campaign_id = c.id
+        JOIN ig_contents ig ON ad.source_ig_media_id = ig.fb_ig_media_id
+        LEFT JOIN ig_content_insights ici
+            ON ici.content_id = ig.id
+        WHERE ad.account_id = {account_id}
+            AND ig.ig_timestamp IS NOT NULL
+            AND (ig.ig_timestamp AT TIME ZONE 'Asia/Seoul')::date >= '{date_start}'::date
+            AND (ig.ig_timestamp AT TIME ZONE 'Asia/Seoul')::date
+                <= (DATE_TRUNC('week', '{date_end}'::date) - INTERVAL '1 day')::date
+            AND ({account_id} IN (3, 2, 26)
+                OR c.name ILIKE '%%depart%%'
+                OR c.name LIKE '%%디파트%%'
+                OR c.name ILIKE '%%de;part%%')
+            AND ici.content_id IS NULL
+    """
+
+    df = pd.read_sql(query, engine)
+
+    missing = df.to_dict(orient='records')
+
+    if missing:
+        for row in missing:
+            print(
+                f"[반응 지표 데이터 누락] source_ig_media_id={row['source_ig_media_id']} "
+                f"ad_id={row['ad_id']} content_id={row['content_id']} "
+                f"업로드일={row['ig_timestamp']} — ig_content_insights 데이터 없음"
+            )
+    else:
+        print("반응 지표 데이터 커버리지 확인: 누락 없음")
+
+    return missing
 
 
 
@@ -2085,7 +2163,7 @@ def get_spend_and_revenue_monthly(account_id, date_start, date_end):
 
             WHERE a.account_id = {account_id}
             AND apd.as_of_date >= '{date_start}'::date
-            AND apd.as_of_date <= DATE_TRUNC('week', '{date_end}'::date)::date
+            AND apd.as_of_date <= '{date_end}'::date
             AND apd.spend IS NOT NULL
             AND apd.purchase_roas IS NOT NULL
             AND ({account_id} IN (3, 2, 26) OR c.name ILIKE '%%depart%%' OR c.name LIKE '%%디파트%%' OR c.name ILIKE '%%de;part%%')
